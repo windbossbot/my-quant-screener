@@ -1,0 +1,5 @@
+{
+  "name": "QuantScreener - Step 1: Crypto Data",
+  "description": "A quantitative market screener starting with crypto data collection from Upbit.",
+  "requestFramePermissions": []
+}
