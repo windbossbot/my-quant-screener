@@ -1,160 +1,251 @@
-import { useEffect, useState } from "react";
+import express from "express";
+import { createServer as createViteServer } from "vite";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 
-export default function App() {
-  const [conditionId, setConditionId] = useState(1);
-  const [rsi, setRsi] = useState(50);
-  const [monthlyMin, setMonthlyMin] = useState(0); // 0 = 제한 없음
-  const [loading, setLoading] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [meta, setMeta] = useState(null);
-  const [rows, setRows] = useState([]);
-  const [err, setErr] = useState("");
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-  const fetchFiltered = async () => {
-    setLoading(true);
-    setErr("");
+async function startServer() {
+  const app = express();
+  const PORT = Number(process.env.PORT) || 3000;
+
+  app.use(express.json());
+
+  // API Route: Fetch Crypto Data from Bithumb with Multi-Timeframe Analysis
+  app.get("/api/crypto", async (req, res) => {
+    const conditionId = req.query.conditionId ? parseInt(req.query.conditionId) : 1;
+    
+    res.setHeader('Content-Type', 'application/json');
+    
     try {
-      const params = new URLSearchParams();
-      params.set("conditionId", String(conditionId));
-      params.set("rsi", String(rsi));
-      params.set("monthlyMin", String(monthlyMin));
+      const tickerResponse = await fetch("https://api.bithumb.com/public/ticker/ALL_KRW");
+      const tickerData = await tickerResponse.json();
+      
+      if (tickerData.status !== "0000") {
+        return res.status(500).json({ success: false, error: "Bithumb API Error" });
+      }
 
-      const res = await fetch(`/api/crypto?${params.toString()}`);
-      const json = await res.json();
-      if (!json.success) throw new Error(json.error || "Failed");
-      setMeta({
-        snapshotUpdatedAt: json.snapshotUpdatedAt,
-        count: json.count,
-        downloadUrl: json.downloadUrl,
+      const symbols = Object.keys(tickerData.data).filter(s => 
+        s !== 'date' && !['USDC', 'USDT', 'USD1', 'USDE'].includes(s)
+      );
+      
+      const preFilteredSymbols = symbols.filter(symbol => {
+        const price = parseFloat(tickerData.data[symbol].closing_price);
+        return price >= 0.01;
       });
-      setRows(Array.isArray(json.data) ? json.data : []);
-    } catch (e) {
-      setErr(e.message || "Error");
-    } finally {
-      setLoading(false);
+
+      const results = [];
+      const calculateMA = (prices, period) => {
+        if (prices.length < period) return null;
+        const sum = prices.slice(0, period).reduce((acc, p) => acc + p, 0);
+        return sum / period;
+      };
+
+      // RSI (Wilder) using closes array where prices[0] is the most recent close
+      const calculateRSI = (prices, period = 14) => {
+        if (!Array.isArray(prices) || prices.length < period + 1) return null;
+        const closes = [...prices].reverse(); // oldest -> latest
+
+        let gainSum = 0;
+        let lossSum = 0;
+
+        for (let i = 1; i <= period; i++) {
+          const change = closes[i] - closes[i - 1];
+          if (change > 0) gainSum += change;
+          else lossSum += -change;
+        }
+
+        let avgGain = gainSum / period;
+        let avgLoss = lossSum / period;
+
+        for (let i = period + 1; i < closes.length; i++) {
+          const change = closes[i] - closes[i - 1];
+          const gain = change > 0 ? change : 0;
+          const loss = change < 0 ? -change : 0;
+          avgGain = (avgGain * (period - 1) + gain) / period;
+          avgLoss = (avgLoss * (period - 1) + loss) / period;
+        }
+
+        if (avgLoss === 0) return 100;
+        const rs = avgGain / avgLoss;
+        return 100 - 100 / (1 + rs);
+      };
+
+      const concurrency = 15;
+      const queue = [...preFilteredSymbols];
+      
+      const workers = Array(concurrency).fill(null).map(async () => {
+        while (queue.length > 0) {
+          const symbol = queue.shift();
+          if (!symbol) break;
+
+          try {
+            const candleRes = await fetch(`https://api.bithumb.com/public/candlestick/${symbol}_KRW/24h`);
+            const candleData = await candleRes.json();
+
+            if (candleData.status === "0000") {
+              const dailyCandles = candleData.data;
+              const reversedDaily = [...dailyCandles].reverse();
+              const dailyPrices = reversedDaily.map(c => parseFloat(c[2]));
+
+              const monthlyPrices = [];
+              for (let j = 0; j < dailyPrices.length; j += 30) {
+                monthlyPrices.push(dailyPrices[j]);
+              }
+
+              const monthlyMin = conditionId === 4 ? 4 : 2;
+              if (monthlyPrices.length >= monthlyMin) {
+                const currentPrice = dailyPrices[0];
+                const ma120Monthly = calculateMA(monthlyPrices, 120);
+                const rsi14 = calculateRSI(dailyPrices, 14);
+
+                // Common Filter: RSI must be >= 50
+                if (rsi14 === null || rsi14 < 40) {
+                  continue;
+                }
+                
+                let passed = true;
+
+                // Condition 1 Specific Logic: Near MA60 (Above)
+                if (conditionId === 1) {
+                  const ma60 = calculateMA(dailyPrices, 60);
+
+                  if (ma60 !== null) {
+                    const upperLimit = ma60 * 1.05;
+                    if (!(currentPrice > ma60 && currentPrice <= upperLimit)) passed = false;
+                  } else {
+                    passed = false;
+                  }
+                }
+                // Condition 2 Specific Logic: Near MA120 (Above)
+                else if (conditionId === 2) {
+                  const ma120 = calculateMA(dailyPrices, 120);
+
+                  if (ma120 !== null) {
+                    const upperLimit = ma120 * 1.05;
+                    if (!(currentPrice > ma120 && currentPrice <= upperLimit)) passed = false;
+                  } else {
+                    passed = false;
+                  }
+                }
+                // Condition 3 Specific Logic: Perfect Alignment (정배열)
+                else if (conditionId === 3) {
+                  const ma20 = calculateMA(dailyPrices, 20);
+                  const ma60 = calculateMA(dailyPrices, 60);
+                  const ma120 = calculateMA(dailyPrices, 120);
+
+                  if (ma20 !== null && ma60 !== null) {
+                    if (ma120 !== null) {
+                      if (!(ma20 > ma60 && ma60 > ma120)) passed = false;
+                    } else {
+                      if (!(ma20 > ma60)) passed = false;
+                    }
+                  } else {
+                    passed = false;
+                  }
+                }
+                // Condition 4 Specific Logic: Exclude Reverse Alignment
+                else if (conditionId === 4) {
+                  if (ma120Monthly !== null && currentPrice <= ma120Monthly) passed = false;
+
+                  if (passed) {
+                    const ma20 = calculateMA(dailyPrices, 20);
+                    const ma60 = calculateMA(dailyPrices, 60);
+                    const ma120 = calculateMA(dailyPrices, 120);
+                    const ma240 = calculateMA(dailyPrices, 240);
+
+                    // NEW: If all daily MAs exist and price is >=5% below ALL of them, exclude
+                    if (
+                      ma20 !== null && ma60 !== null && ma120 !== null && ma240 !== null &&
+                      currentPrice <= ma20 * 0.95 &&
+                      currentPrice <= ma60 * 0.95 &&
+                      currentPrice <= ma120 * 0.95 &&
+                      currentPrice <= ma240 * 0.95
+                    ) {
+                      passed = false;
+                    }
+
+                    if (ma20 !== null && ma60 !== null && ma120 !== null) {
+                      if (ma240 !== null) {
+                        if (ma20 < ma60 && ma60 < ma120 && ma120 < ma240) passed = false;
+                      } else {
+                        if (ma20 < ma60 && ma60 < ma120) passed = false;
+                      }
+                    }
+                  }
+                }
+
+                if (passed) {
+                  const ma20 = calculateMA(dailyPrices, 20);
+                  const ma60 = calculateMA(dailyPrices, 60);
+                  const ma120 = calculateMA(dailyPrices, 120);
+                  const ma240 = calculateMA(dailyPrices, 240);
+
+                  results.push({
+                    market: `${symbol}/KRW`,
+                    korean_name: symbol,
+                    english_name: symbol,
+                    price: currentPrice,
+                    change: parseFloat(tickerData.data[symbol].fluctate_rate_24H) / 100,
+                    volume: parseFloat(tickerData.data[symbol].acc_trade_value_24H),
+                    ma20_d: ma20,
+                    ma60_d: ma60,
+                    ma120_d: ma120,
+                    ma240_d: ma240,
+                    ma120_m: ma120Monthly,
+                    candle_count_m: monthlyPrices.length
+                  });
+                }
+              }
+            }
+          } catch (err) {}
+        }
+      });
+
+      await Promise.all(workers);
+
+      const csvHeader = "Market,Price,MA20(D),MA60(D),MA120(D),MA240(D),MA120(M),MonthlyCandles\n";
+      const csvRows = results.map(r => 
+        `${r.market},${r.price},${r.ma20_d?.toFixed(0) || "N/A"},${r.ma60_d?.toFixed(0) || "N/A"},${r.ma120_d?.toFixed(0) || "N/A"},${r.ma240_d?.toFixed(0) || "N/A"},${r.ma120_m?.toFixed(0) || "N/A"},${r.candle_count_m}`
+      ).join("\n");
+      const csvContent = csvHeader + csvRows;
+
+      const publicDir = path.join(__dirname, "public");
+      if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir);
+      fs.writeFileSync(path.join(publicDir, "screener_result.csv"), csvContent);
+
+      return res.json({ 
+        success: true, 
+        count: results.length, 
+        data: results,
+        downloadUrl: "/screener_result.csv"
+      });
+    } catch (error) {
+      console.error("Error fetching Bithumb data:", error);
+      return res.status(500).json({ success: false, error: "Failed to fetch data" });
     }
-  };
+  });
 
-  const refreshSnapshot = async () => {
-    setRefreshing(true);
-    setErr("");
-    try {
-      const res = await fetch(`/api/crypto/refresh`);
-      const json = await res.json();
-      if (!json.success) throw new Error(json.error || "Refresh failed");
-      // 리프레시 후 자동 재조회
-      await fetchFiltered();
-    } catch (e) {
-      setErr(e.message || "Error");
-    } finally {
-      setRefreshing(false);
-    }
-  };
+  app.use(express.static(path.join(__dirname, "public")));
 
-  // 최초 1회 로드
-  useEffect(() => {
-    fetchFiltered();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    app.use(express.static(path.join(__dirname, "dist")));
+    app.get("*", (req, res) => {
+      res.sendFile(path.join(__dirname, "dist", "index.html"));
+    });
+  }
 
-  return (
-    <div style={{ padding: 16, fontFamily: "system-ui, sans-serif" }}>
-      <h2>Crypto Screener</h2>
-
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-        <label>
-          Condition
-          <select
-            value={conditionId}
-            onChange={(e) => setConditionId(Number(e.target.value))}
-            style={{ marginLeft: 8 }}
-          >
-            <option value={1}>1</option>
-            <option value={2}>2</option>
-            <option value={3}>3</option>
-            <option value={4}>4</option>
-          </select>
-        </label>
-
-        <label>
-          RSI(>=)
-          <input
-            type="number"
-            value={rsi}
-            min={0}
-            max={100}
-            step={1}
-            onChange={(e) => setRsi(Number(e.target.value))}
-            style={{ marginLeft: 8, width: 80 }}
-          />
-        </label>
-
-        <label>
-          월봉 최소개수(>=)
-          <input
-            type="number"
-            value={monthlyMin}
-            min={0}
-            step={1}
-            onChange={(e) => setMonthlyMin(Number(e.target.value))}
-            style={{ marginLeft: 8, width: 80 }}
-          />
-          <span style={{ marginLeft: 6, color: "#666" }}>(0이면 제한 없음)</span>
-        </label>
-
-        <button onClick={fetchFiltered} disabled={loading || refreshing}>
-          {loading ? "조회중..." : "필터 적용"}
-        </button>
-
-        <button onClick={refreshSnapshot} disabled={loading || refreshing}>
-          {refreshing ? "리프레시중..." : "데이터 리프레시"}
-        </button>
-      </div>
-
-      {err && <p style={{ color: "crimson" }}>{err}</p>}
-
-      {meta && (
-        <div style={{ marginTop: 12, color: "#444" }}>
-          <div>Snapshot: {meta.snapshotUpdatedAt}</div>
-          <div>Count: {meta.count}</div>
-          <div>
-            CSV: <a href={meta.downloadUrl}>download</a>
-          </div>
-        </div>
-      )}
-
-      <div style={{ marginTop: 16, overflowX: "auto" }}>
-        <table cellPadding={8} style={{ borderCollapse: "collapse", minWidth: 900 }}>
-          <thead>
-            <tr style={{ background: "#f3f3f3" }}>
-              <th>Market</th>
-              <th>Price</th>
-              <th>RSI14</th>
-              <th>MA20</th>
-              <th>MA60</th>
-              <th>MA120</th>
-              <th>MA240</th>
-              <th>MA120(M)</th>
-              <th>MonthlyCnt</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.market} style={{ borderTop: "1px solid #ddd" }}>
-                <td>{r.market}</td>
-                <td>{r.price}</td>
-                <td>{r.rsi14?.toFixed?.(2) ?? "N/A"}</td>
-                <td>{r.ma20_d?.toFixed?.(0) ?? "N/A"}</td>
-                <td>{r.ma60_d?.toFixed?.(0) ?? "N/A"}</td>
-                <td>{r.ma120_d?.toFixed?.(0) ?? "N/A"}</td>
-                <td>{r.ma240_d?.toFixed?.(0) ?? "N/A"}</td>
-                <td>{r.ma120_m?.toFixed?.(0) ?? "N/A"}</td>
-                <td>{r.candle_count_m}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
 }
+
+startServer();
