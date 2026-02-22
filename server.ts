@@ -36,7 +36,7 @@ async function startServer() {
       const preFilteredSymbols = symbols.filter(symbol => {
         const price = parseFloat(tickerData.data[symbol].closing_price);
         const volume = parseFloat(tickerData.data[symbol].acc_trade_value_24H);
-        return price >= 0.01 && volume >= 300000000;
+        return price >= 0.01 && volume >= 100000000;
       });
 
       const results: any[] = [];
