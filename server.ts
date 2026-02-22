@@ -77,7 +77,7 @@ async function startServer() {
 
                 if (passed) {
                   // Condition 1 Specific Logic: Exclude Reverse Alignment
-                  if (conditionId === 1) {
+                  if (conditionId === 4) {
                     // Monthly: Price > MA120 (if exists) - Specific to Slot 01 now
                     if (ma120Monthly !== null && currentPrice <= ma120Monthly) passed = false;
 
@@ -98,7 +98,7 @@ async function startServer() {
                     }
                   }
                   // Condition 2 Specific Logic: Perfect Alignment (정배열)
-                  else if (conditionId === 2) {
+                  else if (conditionId === 3) {
                     const ma20 = calculateMA(dailyPrices, 20);
                     const ma60 = calculateMA(dailyPrices, 60);
                     const ma120 = calculateMA(dailyPrices, 120);
@@ -117,7 +117,7 @@ async function startServer() {
                     }
                   }
                   // Condition 3 Specific Logic: Near MA60 (Above)
-                  else if (conditionId === 3) {
+                  else if (conditionId === 1) {
                     const ma60 = calculateMA(dailyPrices, 60);
 
                     if (ma60 !== null) {
@@ -130,7 +130,7 @@ async function startServer() {
                     }
                   }
                   // Condition 4 Specific Logic: Near MA120 (Above)
-                  else if (conditionId === 4) {
+                  else if (conditionId === 2) {
                     const ma120 = calculateMA(dailyPrices, 120);
 
                     if (ma120 !== null) {
