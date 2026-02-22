@@ -28,7 +28,7 @@ async function startServer() {
       }
 
       const symbols = Object.keys(tickerData.data).filter(s => 
-        s !== 'date' && !['USDC', 'USDT', 'USD1', 'USDE'].includes(s)
+        s !== 'date' && !['USDC', 'USDT', 'USD1', 'USDE', 'USDS'].includes(s)
       );
       
       const preFilteredSymbols = symbols.filter(symbol => {
