@@ -33,8 +33,7 @@ async function startServer() {
       
       const preFilteredSymbols = symbols.filter(symbol => {
         const price = parseFloat(tickerData.data[symbol].closing_price);
-        const volume = parseFloat(tickerData.data[symbol].acc_trade_value_24H);
-        return price >= 0.01 && volume >= 50000000;
+        return price >= 0.01;
       });
 
       const results = [];
@@ -42,6 +41,36 @@ async function startServer() {
         if (prices.length < period) return null;
         const sum = prices.slice(0, period).reduce((acc, p) => acc + p, 0);
         return sum / period;
+      };
+
+      // RSI (Wilder) using closes array where prices[0] is the most recent close
+      const calculateRSI = (prices, period = 14) => {
+        if (!Array.isArray(prices) || prices.length < period + 1) return null;
+        const closes = [...prices].reverse(); // oldest -> latest
+
+        let gainSum = 0;
+        let lossSum = 0;
+
+        for (let i = 1; i <= period; i++) {
+          const change = closes[i] - closes[i - 1];
+          if (change > 0) gainSum += change;
+          else lossSum += -change;
+        }
+
+        let avgGain = gainSum / period;
+        let avgLoss = lossSum / period;
+
+        for (let i = period + 1; i < closes.length; i++) {
+          const change = closes[i] - closes[i - 1];
+          const gain = change > 0 ? change : 0;
+          const loss = change < 0 ? -change : 0;
+          avgGain = (avgGain * (period - 1) + gain) / period;
+          avgLoss = (avgLoss * (period - 1) + loss) / period;
+        }
+
+        if (avgLoss === 0) return 100;
+        const rs = avgGain / avgLoss;
+        return 100 - 100 / (1 + rs);
       };
 
       const concurrency = 15;
@@ -66,9 +95,16 @@ async function startServer() {
                 monthlyPrices.push(dailyPrices[j]);
               }
 
-              if (monthlyPrices.length >= 5) {
+              const monthlyMin = conditionId === 4 ? 4 : 2;
+              if (monthlyPrices.length >= monthlyMin) {
                 const currentPrice = dailyPrices[0];
                 const ma120Monthly = calculateMA(monthlyPrices, 120);
+                const rsi14 = calculateRSI(dailyPrices, 14);
+
+                // Common Filter: RSI must be >= 50
+                if (rsi14 === null || rsi14 < 40) {
+                  continue;
+                }
                 
                 let passed = true;
 
