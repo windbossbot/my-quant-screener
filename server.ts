@@ -15,9 +15,8 @@ async function startServer() {
 
   // API Route: Fetch Crypto Data from Bithumb with Multi-Timeframe Analysis
   app.get("/api/crypto", async (req, res) => {
-    const conditionId = req.query.conditionId ? parseInt(req.query.conditionId as string) : 1;
+    const conditionId = req.query.conditionId ? parseInt(req.query.conditionId) : 1;
     
-    // Set headers for streaming progress
     res.setHeader('Content-Type', 'application/json');
     
     try {
@@ -32,15 +31,14 @@ async function startServer() {
         s !== 'date' && !['USDC', 'USDT', 'USD1', 'USDE'].includes(s)
       );
       
-      // Common Filter: Price and Volume BEFORE fetching candles
       const preFilteredSymbols = symbols.filter(symbol => {
         const price = parseFloat(tickerData.data[symbol].closing_price);
         const volume = parseFloat(tickerData.data[symbol].acc_trade_value_24H);
-        return price >= 0.01 && volume >= 100000000;
+        return price >= 0.01 && volume >= 50000000;
       });
 
-      const results: any[] = [];
-      const calculateMA = (prices: number[], period: number) => {
+      const results = [];
+      const calculateMA = (prices, period) => {
         if (prices.length < period) return null;
         const sum = prices.slice(0, period).reduce((acc, p) => acc + p, 0);
         return sum / period;
@@ -61,85 +59,84 @@ async function startServer() {
             if (candleData.status === "0000") {
               const dailyCandles = candleData.data;
               const reversedDaily = [...dailyCandles].reverse();
-              const dailyPrices = reversedDaily.map((c: any) => parseFloat(c[2]));
+              const dailyPrices = reversedDaily.map(c => parseFloat(c[2]));
 
-              const monthlyPrices: number[] = [];
+              const monthlyPrices = [];
               for (let j = 0; j < dailyPrices.length; j += 30) {
                 monthlyPrices.push(dailyPrices[j]);
               }
 
-              // Common Filter: Monthly candles count >= 5
               if (monthlyPrices.length >= 5) {
                 const currentPrice = dailyPrices[0];
                 const ma120Monthly = calculateMA(monthlyPrices, 120);
                 
                 let passed = true;
 
-                if (passed) {
-                  // Condition 1 Specific Logic: Exclude Reverse Alignment
-                  if (conditionId === 4) {
-                    // Monthly: Price > MA120 (if exists) - Specific to Slot 01 now
-                    if (ma120Monthly !== null && currentPrice <= ma120Monthly) passed = false;
+                // Condition 1 Specific Logic: Near MA60 (Above)
+                if (conditionId === 1) {
+                  const ma60 = calculateMA(dailyPrices, 60);
 
-                    if (passed) {
-                      const ma20 = calculateMA(dailyPrices, 20);
-                      const ma60 = calculateMA(dailyPrices, 60);
-                      const ma120 = calculateMA(dailyPrices, 120);
-                      const ma240 = calculateMA(dailyPrices, 240);
-
-                      // Daily: Exclude Reverse Alignment
-                      if (ma20 !== null && ma60 !== null && ma120 !== null) {
-                        if (ma240 !== null) {
-                          if (ma20 < ma60 && ma60 < ma120 && ma120 < ma240) passed = false;
-                        } else {
-                          if (ma20 < ma60 && ma60 < ma120) passed = false;
-                        }
-                      }
-                    }
+                  if (ma60 !== null) {
+                    const upperLimit = ma60 * 1.05;
+                    if (!(currentPrice > ma60 && currentPrice <= upperLimit)) passed = false;
+                  } else {
+                    passed = false;
                   }
-                  // Condition 2 Specific Logic: Perfect Alignment (정배열)
-                  else if (conditionId === 3) {
+                }
+                // Condition 2 Specific Logic: Near MA120 (Above)
+                else if (conditionId === 2) {
+                  const ma120 = calculateMA(dailyPrices, 120);
+
+                  if (ma120 !== null) {
+                    const upperLimit = ma120 * 1.05;
+                    if (!(currentPrice > ma120 && currentPrice <= upperLimit)) passed = false;
+                  } else {
+                    passed = false;
+                  }
+                }
+                // Condition 3 Specific Logic: Perfect Alignment (정배열)
+                else if (conditionId === 3) {
+                  const ma20 = calculateMA(dailyPrices, 20);
+                  const ma60 = calculateMA(dailyPrices, 60);
+                  const ma120 = calculateMA(dailyPrices, 120);
+
+                  if (ma20 !== null && ma60 !== null) {
+                    if (ma120 !== null) {
+                      if (!(ma20 > ma60 && ma60 > ma120)) passed = false;
+                    } else {
+                      if (!(ma20 > ma60)) passed = false;
+                    }
+                  } else {
+                    passed = false;
+                  }
+                }
+                // Condition 4 Specific Logic: Exclude Reverse Alignment
+                else if (conditionId === 4) {
+                  if (ma120Monthly !== null && currentPrice <= ma120Monthly) passed = false;
+
+                  if (passed) {
                     const ma20 = calculateMA(dailyPrices, 20);
                     const ma60 = calculateMA(dailyPrices, 60);
                     const ma120 = calculateMA(dailyPrices, 120);
+                    const ma240 = calculateMA(dailyPrices, 240);
 
-                    // Daily Perfect Alignment check (Ignoring 240-day MA)
-                    if (ma20 !== null && ma60 !== null) {
-                      if (ma120 !== null) {
-                        // Perfect Alignment: 20 > 60 > 120
-                        if (!(ma20 > ma60 && ma60 > ma120)) passed = false;
+                    // NEW: If all daily MAs exist and price is >=5% below ALL of them, exclude
+                    if (
+                      ma20 !== null && ma60 !== null && ma120 !== null && ma240 !== null &&
+                      currentPrice <= ma20 * 0.95 &&
+                      currentPrice <= ma60 * 0.95 &&
+                      currentPrice <= ma120 * 0.95 &&
+                      currentPrice <= ma240 * 0.95
+                    ) {
+                      passed = false;
+                    }
+
+                    if (ma20 !== null && ma60 !== null && ma120 !== null) {
+                      if (ma240 !== null) {
+                        if (ma20 < ma60 && ma60 < ma120 && ma120 < ma240) passed = false;
                       } else {
-                        // If MA120 is missing, judge by 20 > 60
-                        if (!(ma20 > ma60)) passed = false;
+                        if (ma20 < ma60 && ma60 < ma120) passed = false;
                       }
-                    } else {
-                      passed = false;
-                    }
-                  }
-                  // Condition 3 Specific Logic: Near MA60 (Above)
-                  else if (conditionId === 1) {
-                    const ma60 = calculateMA(dailyPrices, 60);
-
-                    if (ma60 !== null) {
-                      // Price must be above MA60 and within 5% range
-                      const upperLimit = ma60 * 1.05;
-                      if (!(currentPrice > ma60 && currentPrice <= upperLimit)) passed = false;
-                    } else {
-                      // If MA60 doesn't exist, it can't be "near" it
-                      passed = false;
-                    }
-                  }
-                  // Condition 4 Specific Logic: Near MA120 (Above)
-                  else if (conditionId === 2) {
-                    const ma120 = calculateMA(dailyPrices, 120);
-
-                    if (ma120 !== null) {
-                      // Price must be above MA120 and within 5% range
-                      const upperLimit = ma120 * 1.05;
-                      if (!(currentPrice > ma120 && currentPrice <= upperLimit)) passed = false;
-                    } else {
-                      // If MA120 doesn't exist, it can't be "near" it
-                      passed = false;
                     }
                   }
                 }
@@ -167,17 +164,14 @@ async function startServer() {
                 }
               }
             }
-          } catch (err) {
-            // Ignore
-          }
+          } catch (err) {}
         }
       });
 
       await Promise.all(workers);
 
-      // Save CSV
       const csvHeader = "Market,Price,MA20(D),MA60(D),MA120(D),MA240(D),MA120(M),MonthlyCandles\n";
-      const csvRows = results.map((r: any) => 
+      const csvRows = results.map(r => 
         `${r.market},${r.price},${r.ma20_d?.toFixed(0) || "N/A"},${r.ma60_d?.toFixed(0) || "N/A"},${r.ma120_d?.toFixed(0) || "N/A"},${r.ma240_d?.toFixed(0) || "N/A"},${r.ma120_m?.toFixed(0) || "N/A"},${r.candle_count_m}`
       ).join("\n");
       const csvContent = csvHeader + csvRows;
@@ -198,10 +192,8 @@ async function startServer() {
     }
   });
 
-  // Serve static files from public
   app.use(express.static(path.join(__dirname, "public")));
 
-  // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
