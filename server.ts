@@ -67,6 +67,17 @@ async function startServer() {
         return ma20 > ma60;
       };
 
+      const isNearDailyMA20 = (prices, currentPrice) => {
+        const ma20 = calculateMA(prices, 20);
+        if (ma20 === null) {
+          return false;
+        }
+
+        const lowerLimit = ma20 * 0.95;
+        const upperLimit = ma20 * 1.05;
+        return currentPrice >= lowerLimit && currentPrice <= upperLimit;
+      };
+
       // RSI (Wilder) using closes array where prices[0] is the most recent close
       const calculateRSI = (prices, period = 14) => {
         if (!Array.isArray(prices) || prices.length < period + 1) return null;
@@ -189,13 +200,20 @@ async function startServer() {
                 }
                 // Condition 5 Specific Logic: Monthly + Weekly Perfect Alignment
                 else if (conditionId === 5) {
-                  if (!isBullishAlignment(monthlyPrices) || !isBullishAlignment(weeklyPrices)) {
+                  if (
+                    !isBullishAlignment(monthlyPrices) ||
+                    !isBullishAlignment(weeklyPrices) ||
+                    !isNearDailyMA20(dailyPrices, currentPrice)
+                  ) {
                     passed = false;
                   }
                 }
                 // Condition 6 Specific Logic: Daily Perfect Alignment
                 else if (conditionId === 6) {
-                  if (!isBullishAlignment(dailyPrices)) {
+                  if (
+                    !isBullishAlignment(dailyPrices) ||
+                    !isNearDailyMA20(dailyPrices, currentPrice)
+                  ) {
                     passed = false;
                   }
                 }
