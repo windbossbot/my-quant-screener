@@ -11,6 +11,14 @@ interface CryptoData {
   volume: number;
 }
 
+const CONDITIONS = [
+  { id: 1, title: "60일선 근처", description: "현재가가 일봉 60일선 위에 있으면서 5% 이내인 종목" },
+  { id: 2, title: "120일선 근처", description: "현재가가 일봉 120일선 위에 있으면서 5% 이내인 종목" },
+  { id: 3, title: "일봉 정배열", description: "일봉 20일선, 60일선, 120일선이 상승 정배열인 종목" },
+  { id: 4, title: "역배열 제외", description: "강한 역배열과 장기 약세 구간을 제외한 살아있는 종목" },
+  { id: 5, title: "월봉+주봉 정배열", description: "월봉과 주봉이 정배열이고 현재가가 일봉 20일선 근처인 종목" },
+] as const;
+
 export default function App() {
   const [data, setData] = useState<CryptoData[]>([]);
   const [loading, setLoading] = useState(false);
@@ -75,6 +83,7 @@ export default function App() {
   };
 
   const sortedData = getSortedData();
+  const selectedConditionMeta = CONDITIONS.find((condition) => condition.id === selectedCondition);
 
   const SortIcon = ({ column }: { column: keyof CryptoData }) => {
     if (sortConfig.key !== column) return <div className="w-3 h-3 opacity-20 ml-1 inline-block" />;
@@ -97,23 +106,32 @@ export default function App() {
             Quant <span className="not-italic font-sans font-bold">Screener</span>
           </h1>
           
-          <div className="mt-8 flex items-center gap-4">
-            <span className="text-[10px] font-mono uppercase opacity-40">Condition Slot:</span>
-            <div className="flex gap-2">
-              {[1, 2, 3, 4, 5, 6].map((id) => (
+          <div className="mt-8 space-y-3">
+            <span className="block text-[10px] font-mono uppercase opacity-40">Condition Slot:</span>
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+              {CONDITIONS.map((condition) => (
                 <button
-                  key={id}
-                  onClick={() => setSelectedCondition(id)}
-                  className={`px-4 py-1 text-xs font-mono border transition-all cursor-pointer ${
-                    selectedCondition === id 
-                      ? 'bg-[#141414] text-[#E4E3E0] border-[#141414]' 
-                      : 'border-[#141414]/20 opacity-40 hover:opacity-100'
+                  key={condition.id}
+                  onClick={() => setSelectedCondition(condition.id)}
+                  className={`rounded-2xl border p-4 text-left transition-all cursor-pointer ${
+                    selectedCondition === condition.id
+                      ? 'bg-[#141414] text-[#E4E3E0] border-[#141414]'
+                      : 'border-[#141414]/20 opacity-70 hover:opacity-100'
                   }`}
                 >
-                  {id.toString().padStart(2, '0')}
+                  <div className="mb-2 text-xs font-mono uppercase tracking-widest">
+                    {condition.id.toString().padStart(2, '0')}
+                  </div>
+                  <div className="text-base font-semibold tracking-tight">{condition.title}</div>
+                  <div className="mt-1 text-xs leading-relaxed opacity-70">{condition.description}</div>
                 </button>
               ))}
             </div>
+            {selectedConditionMeta && (
+              <div className="max-w-2xl text-sm leading-relaxed opacity-60">
+                {selectedConditionMeta.description}
+              </div>
+            )}
           </div>
         </div>
 

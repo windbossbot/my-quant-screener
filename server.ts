@@ -208,16 +208,6 @@ async function startServer() {
                     passed = false;
                   }
                 }
-                // Condition 6 Specific Logic: Daily Perfect Alignment
-                else if (conditionId === 6) {
-                  if (
-                    !isBullishAlignment(dailyPrices) ||
-                    !isNearDailyMA20(dailyPrices, currentPrice)
-                  ) {
-                    passed = false;
-                  }
-                }
-
                 if (passed) {
                   const ma20 = calculateMA(dailyPrices, 20);
                   const ma60 = calculateMA(dailyPrices, 60);
