@@ -43,6 +43,30 @@ async function startServer() {
         return sum / period;
       };
 
+      const toHigherTimeframePrices = (prices, step) => {
+        const higherTimeframePrices = [];
+        for (let i = 0; i < prices.length; i += step) {
+          higherTimeframePrices.push(prices[i]);
+        }
+        return higherTimeframePrices;
+      };
+
+      const isBullishAlignment = (prices) => {
+        const ma20 = calculateMA(prices, 20);
+        const ma60 = calculateMA(prices, 60);
+        const ma120 = calculateMA(prices, 120);
+
+        if (ma20 === null || ma60 === null) {
+          return false;
+        }
+
+        if (ma120 !== null) {
+          return ma20 > ma60 && ma60 > ma120;
+        }
+
+        return ma20 > ma60;
+      };
+
       // RSI (Wilder) using closes array where prices[0] is the most recent close
       const calculateRSI = (prices, period = 14) => {
         if (!Array.isArray(prices) || prices.length < period + 1) return null;
@@ -89,11 +113,8 @@ async function startServer() {
               const dailyCandles = candleData.data;
               const reversedDaily = [...dailyCandles].reverse();
               const dailyPrices = reversedDaily.map(c => parseFloat(c[2]));
-
-              const monthlyPrices = [];
-              for (let j = 0; j < dailyPrices.length; j += 30) {
-                monthlyPrices.push(dailyPrices[j]);
-              }
+              const weeklyPrices = toHigherTimeframePrices(dailyPrices, 7);
+              const monthlyPrices = toHigherTimeframePrices(dailyPrices, 30);
 
               const monthlyMin = conditionId === 4 ? 4 : 2;
               if (monthlyPrices.length >= monthlyMin) {
@@ -101,7 +122,7 @@ async function startServer() {
                 const ma120Monthly = calculateMA(monthlyPrices, 120);
                 const rsi14 = calculateRSI(dailyPrices, 14);
 
-                // Common Filter: RSI must be >= 50
+                // Common Filter: RSI must be >= 40
                 if (rsi14 === null || rsi14 < 40) {
                   continue;
                 }
@@ -132,17 +153,7 @@ async function startServer() {
                 }
                 // Condition 3 Specific Logic: Perfect Alignment (정배열)
                 else if (conditionId === 3) {
-                  const ma20 = calculateMA(dailyPrices, 20);
-                  const ma60 = calculateMA(dailyPrices, 60);
-                  const ma120 = calculateMA(dailyPrices, 120);
-
-                  if (ma20 !== null && ma60 !== null) {
-                    if (ma120 !== null) {
-                      if (!(ma20 > ma60 && ma60 > ma120)) passed = false;
-                    } else {
-                      if (!(ma20 > ma60)) passed = false;
-                    }
-                  } else {
+                  if (!isBullishAlignment(dailyPrices)) {
                     passed = false;
                   }
                 }
@@ -174,6 +185,18 @@ async function startServer() {
                         if (ma20 < ma60 && ma60 < ma120) passed = false;
                       }
                     }
+                  }
+                }
+                // Condition 5 Specific Logic: Monthly + Weekly Perfect Alignment
+                else if (conditionId === 5) {
+                  if (!isBullishAlignment(monthlyPrices) || !isBullishAlignment(weeklyPrices)) {
+                    passed = false;
+                  }
+                }
+                // Condition 6 Specific Logic: Daily Perfect Alignment
+                else if (conditionId === 6) {
+                  if (!isBullishAlignment(dailyPrices)) {
+                    passed = false;
                   }
                 }
 

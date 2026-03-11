@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Download, RefreshCw, TrendingUp, TrendingDown, Coins, Search } from "lucide-react";
+import { Download, TrendingUp, TrendingDown, Coins, Search } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
 interface CryptoData {
@@ -100,7 +100,7 @@ export default function App() {
           <div className="mt-8 flex items-center gap-4">
             <span className="text-[10px] font-mono uppercase opacity-40">Condition Slot:</span>
             <div className="flex gap-2">
-              {[1, 2, 3, 4].map((id) => (
+              {[1, 2, 3, 4, 5, 6].map((id) => (
                 <button
                   key={id}
                   onClick={() => setSelectedCondition(id)}
