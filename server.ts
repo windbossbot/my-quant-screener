@@ -198,10 +198,18 @@ async function startServer() {
                     }
                   }
                 }
-                // Condition 5 Specific Logic: Monthly + Weekly Perfect Alignment
+                // Condition 5 Specific Logic: Monthly Perfect Alignment
                 else if (conditionId === 5) {
                   if (
                     !isBullishAlignment(monthlyPrices) ||
+                    !isNearDailyMA20(dailyPrices, currentPrice)
+                  ) {
+                    passed = false;
+                  }
+                }
+                // Condition 6 Specific Logic: Weekly Perfect Alignment
+                else if (conditionId === 6) {
+                  if (
                     !isBullishAlignment(weeklyPrices) ||
                     !isNearDailyMA20(dailyPrices, currentPrice)
                   ) {
