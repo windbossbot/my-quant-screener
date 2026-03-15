@@ -19,7 +19,7 @@ type ScreenerRow = {
   candle_count_m: number;
 };
 
-type ConditionId = 1 | 2 | 3 | 4 | 5 | 6;
+type ConditionId = 1 | 2 | 3 | 4 | 5;
 type ResultsByCondition = Record<ConditionId, ScreenerRow[]>;
 
 const __filename = fileURLToPath(import.meta.url);
@@ -140,7 +140,6 @@ async function startServer() {
       3: [],
       4: [],
       5: [],
-      6: [],
     });
 
   const getScreenableSymbols = (tickerData: any) => {
@@ -274,15 +273,8 @@ async function startServer() {
             resultsByCondition[4].push(row);
           }
 
-          if (
-            isWithinPercentRange(currentFourHourPrice, ma20FourHour, 5, -1) &&
-            isWithinPercentRange(currentFourHourPrice, ma240FourHour, 2, -10)
-          ) {
-            resultsByCondition[5].push(row);
-          }
-
           if (isBullishAlignment(fourHourPrices)) {
-            resultsByCondition[6].push(row);
+            resultsByCondition[5].push(row);
           }
         } catch {}
       }
@@ -345,7 +337,7 @@ async function startServer() {
   // API Route: Fetch Crypto Data from Bithumb with Multi-Timeframe Analysis
   app.get("/api/crypto", async (req, res) => {
     const requested = req.query.conditionId ? parseInt(req.query.conditionId.toString(), 10) : 1;
-    const conditionId = ([1, 2, 3, 4, 5, 6].includes(requested) ? requested : 1) as ConditionId;
+    const conditionId = ([1, 2, 3, 4, 5].includes(requested) ? requested : 1) as ConditionId;
     const forceRefresh = req.query.refresh === "1";
     const isDailyCondition = conditionId <= 3;
 
