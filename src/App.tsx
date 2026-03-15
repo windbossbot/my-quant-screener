@@ -32,6 +32,7 @@ export default function App() {
   });
 
   const getCacheKey = (conditionId: number) => `quant-screener-condition-${conditionId}`;
+  const getPendingKey = (conditionId: number) => `quant-screener-pending-${conditionId}`;
 
   const readCachedData = (conditionId: number) => {
     const cached = sessionStorage.getItem(getCacheKey(conditionId));
@@ -54,6 +55,37 @@ export default function App() {
     );
   };
 
+  const fetchConditionData = async (conditionId: number, forceRefresh = false) => {
+    if (!forceRefresh) {
+      const cached = readCachedData(conditionId);
+      if (cached) {
+        return cached;
+      }
+    }
+
+    if (sessionStorage.getItem(getPendingKey(conditionId))) {
+      return null;
+    }
+
+    sessionStorage.setItem(getPendingKey(conditionId), "true");
+    try {
+      const response = await fetch(`/api/crypto?conditionId=${conditionId}`);
+      const result = await response.json();
+      if (!result.success) {
+        return null;
+      }
+
+      const updatedAt = new Date().toLocaleTimeString();
+      writeCachedData(conditionId, result.data, updatedAt);
+      return { data: result.data as CryptoData[], lastUpdated: updatedAt };
+    } catch (error) {
+      console.error("Failed to fetch data:", error);
+      return null;
+    } finally {
+      sessionStorage.removeItem(getPendingKey(conditionId));
+    }
+  };
+
   const fetchData = async (forceRefresh = false) => {
     if (!forceRefresh) {
       const cached = readCachedData(selectedCondition);
@@ -66,16 +98,11 @@ export default function App() {
 
     setLoading(true);
     try {
-      const response = await fetch(`/api/crypto?conditionId=${selectedCondition}`);
-      const result = await response.json();
-      if (result.success) {
-        const updatedAt = new Date().toLocaleTimeString();
+      const result = await fetchConditionData(selectedCondition, forceRefresh);
+      if (result) {
         setData(result.data);
-        setLastUpdated(updatedAt);
-        writeCachedData(selectedCondition, result.data, updatedAt);
+        setLastUpdated(result.lastUpdated);
       }
-    } catch (error) {
-      console.error("Failed to fetch data:", error);
     } finally {
       setLoading(false);
     }
@@ -89,6 +116,39 @@ export default function App() {
     sessionStorage.removeItem(getCacheKey(selectedCondition));
     fetchData(true);
   };
+
+  useEffect(() => {
+    const remainingConditions = CONDITIONS
+      .map((condition) => condition.id)
+      .filter((conditionId) => conditionId !== selectedCondition && !readCachedData(conditionId));
+
+    if (remainingConditions.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const prefetchNext = async (index: number) => {
+      if (cancelled || index >= remainingConditions.length) {
+        return;
+      }
+
+      await fetchConditionData(remainingConditions[index]);
+      if (!cancelled) {
+        timer = setTimeout(() => prefetchNext(index + 1), 250);
+      }
+    };
+
+    timer = setTimeout(() => prefetchNext(0), 500);
+
+    return () => {
+      cancelled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
+  }, [selectedCondition]);
 
   const handleSort = (key: keyof CryptoData) => {
     let direction: 'asc' | 'desc' = 'desc';
@@ -126,7 +186,7 @@ export default function App() {
   const selectedConditionMeta = CONDITIONS.find((condition) => condition.id === selectedCondition);
   const openBithumbMarket = (market: string) => {
     const symbol = market.split("/")[0];
-    window.open(`https://www.bithumb.com/react/trade/order/${symbol}-KRW`, "_blank", "noopener,noreferrer");
+    window.open(`https://www.bithumb.com/react/trade/order/${symbol}-KRW`, "bithumb-trade-window", "noopener,noreferrer");
   };
 
   const SortIcon = ({ column }: { column: keyof CryptoData }) => {
