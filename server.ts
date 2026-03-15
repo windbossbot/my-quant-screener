@@ -78,6 +78,16 @@ async function startServer() {
         return currentPrice >= lowerLimit && currentPrice <= upperLimit;
       };
 
+      const isWithinPercentRange = (currentPrice, movingAverage, upperPercent, lowerPercent) => {
+        if (movingAverage === null) {
+          return false;
+        }
+
+        const upperLimit = movingAverage * (1 + upperPercent / 100);
+        const lowerLimit = movingAverage * (1 + lowerPercent / 100);
+        return currentPrice >= lowerLimit && currentPrice <= upperLimit;
+      };
+
       // RSI (Wilder) using closes array where prices[0] is the most recent close
       const calculateRSI = (prices, period = 14) => {
         if (!Array.isArray(prices) || prices.length < period + 1) return null;
@@ -127,10 +137,9 @@ async function startServer() {
               const weeklyPrices = toHigherTimeframePrices(dailyPrices, 7);
               const monthlyPrices = toHigherTimeframePrices(dailyPrices, 30);
 
-              const monthlyMin = conditionId === 4 ? 4 : 2;
+              const monthlyMin = 2;
               if (monthlyPrices.length >= monthlyMin) {
                 const currentPrice = dailyPrices[0];
-                const ma120Monthly = calculateMA(monthlyPrices, 120);
                 const rsi14 = calculateRSI(dailyPrices, 14);
 
                 // Common Filter: RSI must be >= 40
@@ -140,66 +149,14 @@ async function startServer() {
                 
                 let passed = true;
 
-                // Condition 1 Specific Logic: Near MA60 (Above)
+                // Condition 1 Specific Logic: Daily Perfect Alignment
                 if (conditionId === 1) {
-                  const ma60 = calculateMA(dailyPrices, 60);
-
-                  if (ma60 !== null) {
-                    const upperLimit = ma60 * 1.05;
-                    if (!(currentPrice > ma60 && currentPrice <= upperLimit)) passed = false;
-                  } else {
-                    passed = false;
-                  }
-                }
-                // Condition 2 Specific Logic: Near MA120 (Above)
-                else if (conditionId === 2) {
-                  const ma120 = calculateMA(dailyPrices, 120);
-
-                  if (ma120 !== null) {
-                    const upperLimit = ma120 * 1.05;
-                    if (!(currentPrice > ma120 && currentPrice <= upperLimit)) passed = false;
-                  } else {
-                    passed = false;
-                  }
-                }
-                // Condition 3 Specific Logic: Perfect Alignment (정배열)
-                else if (conditionId === 3) {
                   if (!isBullishAlignment(dailyPrices)) {
                     passed = false;
                   }
                 }
-                // Condition 4 Specific Logic: Exclude Reverse Alignment
-                else if (conditionId === 4) {
-                  if (ma120Monthly !== null && currentPrice <= ma120Monthly) passed = false;
-
-                  if (passed) {
-                    const ma20 = calculateMA(dailyPrices, 20);
-                    const ma60 = calculateMA(dailyPrices, 60);
-                    const ma120 = calculateMA(dailyPrices, 120);
-                    const ma240 = calculateMA(dailyPrices, 240);
-
-                    // NEW: If all daily MAs exist and price is >=5% below ALL of them, exclude
-                    if (
-                      ma20 !== null && ma60 !== null && ma120 !== null && ma240 !== null &&
-                      currentPrice <= ma20 * 0.95 &&
-                      currentPrice <= ma60 * 0.95 &&
-                      currentPrice <= ma120 * 0.95 &&
-                      currentPrice <= ma240 * 0.95
-                    ) {
-                      passed = false;
-                    }
-
-                    if (ma20 !== null && ma60 !== null && ma120 !== null) {
-                      if (ma240 !== null) {
-                        if (ma20 < ma60 && ma60 < ma120 && ma120 < ma240) passed = false;
-                      } else {
-                        if (ma20 < ma60 && ma60 < ma120) passed = false;
-                      }
-                    }
-                  }
-                }
-                // Condition 5 Specific Logic: Monthly Perfect Alignment
-                else if (conditionId === 5) {
+                // Condition 2 Specific Logic: Monthly Perfect Alignment
+                else if (conditionId === 2) {
                   if (
                     !isBullishAlignment(monthlyPrices) ||
                     !isNearDailyMA20(dailyPrices, currentPrice)
@@ -207,11 +164,35 @@ async function startServer() {
                     passed = false;
                   }
                 }
-                // Condition 6 Specific Logic: Weekly Perfect Alignment
-                else if (conditionId === 6) {
+                // Condition 3 Specific Logic: Weekly Perfect Alignment
+                else if (conditionId === 3) {
                   if (
                     !isBullishAlignment(weeklyPrices) ||
                     !isNearDailyMA20(dailyPrices, currentPrice)
+                  ) {
+                    passed = false;
+                  }
+                }
+                // Condition 4 Specific Logic: MA20 + MA120 Range Filter
+                else if (conditionId === 4) {
+                  const ma20 = calculateMA(dailyPrices, 20);
+                  const ma120 = calculateMA(dailyPrices, 120);
+
+                  if (
+                    !isWithinPercentRange(currentPrice, ma20, 5, -1) ||
+                    !isWithinPercentRange(currentPrice, ma120, 2, -10)
+                  ) {
+                    passed = false;
+                  }
+                }
+                // Condition 5 Specific Logic: MA20 + MA240 Range Filter
+                else if (conditionId === 5) {
+                  const ma20 = calculateMA(dailyPrices, 20);
+                  const ma240 = calculateMA(dailyPrices, 240);
+
+                  if (
+                    !isWithinPercentRange(currentPrice, ma20, 5, -1) ||
+                    !isWithinPercentRange(currentPrice, ma240, 2, -10)
                   ) {
                     passed = false;
                   }
@@ -233,7 +214,7 @@ async function startServer() {
                     ma60_d: ma60,
                     ma120_d: ma120,
                     ma240_d: ma240,
-                    ma120_m: ma120Monthly,
+                    ma120_m: calculateMA(monthlyPrices, 120),
                     candle_count_m: monthlyPrices.length
                   });
                 }

@@ -12,12 +12,11 @@ interface CryptoData {
 }
 
 const CONDITIONS = [
-  { id: 1, title: "60일선 근처", description: "현재가가 일봉 60일선 위에 있으면서 5% 이내인 종목" },
-  { id: 2, title: "120일선 근처", description: "현재가가 일봉 120일선 위에 있으면서 5% 이내인 종목" },
-  { id: 3, title: "일봉 정배열", description: "일봉 20일선, 60일선, 120일선이 상승 정배열인 종목" },
-  { id: 4, title: "역배열 제외", description: "강한 역배열과 장기 약세 구간을 제외한 살아있는 종목" },
-  { id: 5, title: "월봉 정배열", description: "월봉이 정배열이고 현재가가 일봉 20일선 위아래 5% 이내인 종목" },
-  { id: 6, title: "주봉 정배열", description: "주봉이 정배열이고 현재가가 일봉 20일선 위아래 5% 이내인 종목" },
+  { id: 1, title: "일봉 정배열", description: "일봉 20일선, 60일선, 120일선이 상승 정배열인 종목" },
+  { id: 2, title: "월봉 정배열", description: "월봉이 정배열이고 현재가가 일봉 20일선 위아래 5% 이내인 종목" },
+  { id: 3, title: "주봉 정배열", description: "주봉이 정배열이고 현재가가 일봉 20일선 위아래 5% 이내인 종목" },
+  { id: 4, title: "20·120선 범위", description: "현재가가 20일선 대비 +5%~-1%, 120일선 대비 +2%~-10% 범위인 종목" },
+  { id: 5, title: "20·240선 범위", description: "현재가가 20일선 대비 +5%~-1%, 240일선 대비 +2%~-10% 범위인 종목" },
 ] as const;
 
 export default function App() {
