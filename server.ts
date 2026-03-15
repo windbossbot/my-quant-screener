@@ -43,6 +43,13 @@ async function startServer() {
         return sum / period;
       };
 
+      const fetchJson = async (url) => {
+        const response = await fetch(url, {
+          signal: AbortSignal.timeout(8000),
+        });
+        return response.json();
+      };
+
       const toHigherTimeframePrices = (prices, step) => {
         const higherTimeframePrices = [];
         for (let i = 0; i < prices.length; i += step) {
@@ -88,6 +95,11 @@ async function startServer() {
         return currentPrice >= lowerLimit && currentPrice <= upperLimit;
       };
 
+      // Build a simple 4h close series from 1h closes while keeping newest price first.
+      const toFourHourPrices = (hourlyPrices) => {
+        return toHigherTimeframePrices(hourlyPrices, 4);
+      };
+
       // RSI (Wilder) using closes array where prices[0] is the most recent close
       const calculateRSI = (prices, period = 14) => {
         if (!Array.isArray(prices) || prices.length < period + 1) return null;
@@ -127,20 +139,27 @@ async function startServer() {
           if (!symbol) break;
 
           try {
-            const candleRes = await fetch(`https://api.bithumb.com/public/candlestick/${symbol}_KRW/24h`);
-            const candleData = await candleRes.json();
+            const [dailyCandleData, hourlyCandleData] = await Promise.all([
+              fetchJson(`https://api.bithumb.com/public/candlestick/${symbol}_KRW/24h`),
+              fetchJson(`https://api.bithumb.com/public/candlestick/${symbol}_KRW/1h`),
+            ]);
 
-            if (candleData.status === "0000") {
-              const dailyCandles = candleData.data;
+            if (dailyCandleData.status === "0000" && hourlyCandleData.status === "0000") {
+              const dailyCandles = dailyCandleData.data;
+              const hourlyCandles = hourlyCandleData.data;
               const reversedDaily = [...dailyCandles].reverse();
+              const reversedHourly = [...hourlyCandles].reverse();
               const dailyPrices = reversedDaily.map(c => parseFloat(c[2]));
+              const hourlyPrices = reversedHourly.map(c => parseFloat(c[2]));
+              const fourHourPrices = toFourHourPrices(hourlyPrices);
               const weeklyPrices = toHigherTimeframePrices(dailyPrices, 7);
               const monthlyPrices = toHigherTimeframePrices(dailyPrices, 30);
 
               const monthlyMin = 2;
-              if (monthlyPrices.length >= monthlyMin) {
+              if (monthlyPrices.length >= monthlyMin && fourHourPrices.length >= 20) {
                 const currentPrice = dailyPrices[0];
                 const rsi14 = calculateRSI(dailyPrices, 14);
+                const currentFourHourPrice = fourHourPrices[0];
 
                 // Common Filter: RSI must be >= 40
                 if (rsi14 === null || rsi14 < 40) {
@@ -175,28 +194,35 @@ async function startServer() {
                 }
                 // Condition 4 Specific Logic: MA20 + MA120 Range Filter
                 else if (conditionId === 4) {
-                  const ma20 = calculateMA(dailyPrices, 20);
-                  const ma120 = calculateMA(dailyPrices, 120);
+                  const ma20 = calculateMA(fourHourPrices, 20);
+                  const ma120 = calculateMA(fourHourPrices, 120);
 
                   if (
-                    !isWithinPercentRange(currentPrice, ma20, 5, -1) ||
-                    !isWithinPercentRange(currentPrice, ma120, 2, -10)
+                    !isWithinPercentRange(currentFourHourPrice, ma20, 5, -1) ||
+                    !isWithinPercentRange(currentFourHourPrice, ma120, 2, -10)
                   ) {
                     passed = false;
                   }
                 }
                 // Condition 5 Specific Logic: MA20 + MA240 Range Filter
                 else if (conditionId === 5) {
-                  const ma20 = calculateMA(dailyPrices, 20);
-                  const ma240 = calculateMA(dailyPrices, 240);
+                  const ma20 = calculateMA(fourHourPrices, 20);
+                  const ma240 = calculateMA(fourHourPrices, 240);
 
                   if (
-                    !isWithinPercentRange(currentPrice, ma20, 5, -1) ||
-                    !isWithinPercentRange(currentPrice, ma240, 2, -10)
+                    !isWithinPercentRange(currentFourHourPrice, ma20, 5, -1) ||
+                    !isWithinPercentRange(currentFourHourPrice, ma240, 2, -10)
                   ) {
                     passed = false;
                   }
                 }
+                // Condition 6 Specific Logic: 4H Perfect Alignment
+                else if (conditionId === 6) {
+                  if (!isBullishAlignment(fourHourPrices)) {
+                    passed = false;
+                  }
+                }
+
                 if (passed) {
                   const ma20 = calculateMA(dailyPrices, 20);
                   const ma60 = calculateMA(dailyPrices, 60);
