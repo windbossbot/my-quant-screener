@@ -7,7 +7,6 @@
     "dev": "tsx server.ts",
     "start": "node server.ts",
     "build": "vite build",
-    "preview": "vite preview",
     "clean": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"if (Test-Path dist) { Remove-Item dist -Recurse -Force }; if (Test-Path public\\screener_result.csv) { Remove-Item public\\screener_result.csv -Force }; Get-ChildItem -Path . -Filter *.log -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue\"",
     "lint": "tsc --noEmit"
   },
@@ -23,7 +22,6 @@
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.4",
-    "autoprefixer": "^10.4.21",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
