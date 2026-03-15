@@ -29,8 +29,10 @@ async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
   const CACHE_TTL_MS = 15 * 60 * 1000;
-  let cachedResults: { generatedAt: number; resultsByCondition: ResultsByCondition } | null = null;
-  let inflightBuild: Promise<{ generatedAt: number; resultsByCondition: ResultsByCondition }> | null = null;
+  let cachedDailyResults: { generatedAt: number; resultsByCondition: ResultsByCondition } | null = null;
+  let cachedFourHourResults: { generatedAt: number; resultsByCondition: ResultsByCondition } | null = null;
+  let inflightDailyBuild: Promise<{ generatedAt: number; resultsByCondition: ResultsByCondition }> | null = null;
+  let inflightFourHourBuild: Promise<{ generatedAt: number; resultsByCondition: ResultsByCondition }> | null = null;
 
   app.use(express.json());
 
@@ -121,7 +123,7 @@ async function startServer() {
     return 100 - 100 / (1 + rs);
   };
 
-  const buildAllConditionResults = async () => {
+  const getTickerData = async () => {
     const tickerResponse = await fetch("https://api.bithumb.com/public/ticker/ALL_KRW");
     const tickerData = await tickerResponse.json();
 
@@ -129,26 +131,49 @@ async function startServer() {
       throw new Error("Bithumb API Error");
     }
 
-    const resultsByCondition: ResultsByCondition = {
+    return tickerData;
+  };
+
+  const createEmptyResults = (): ResultsByCondition => ({
       1: [],
       2: [],
       3: [],
       4: [],
       5: [],
       6: [],
-    };
+    });
 
+  const getScreenableSymbols = (tickerData: any) => {
     const symbols = Object.keys(tickerData.data).filter((s) =>
       s !== "date" && !["USDC", "USDT", "USD1", "USDE", "USDS"].includes(s)
     );
 
-    const preFilteredSymbols = symbols.filter((symbol) => {
+    return symbols.filter((symbol) => {
       const price = parseFloat(tickerData.data[symbol].closing_price);
       return price >= 0.01;
     });
+  };
 
+  const buildRow = (tickerData: any, symbol: string, currentPrice: number, dailyPrices: number[], monthlyPrices: number[]): ScreenerRow => ({
+    market: `${symbol}/KRW`,
+    korean_name: symbol,
+    english_name: symbol,
+    price: currentPrice,
+    change: parseFloat(tickerData.data[symbol].fluctate_rate_24H) / 100,
+    volume: parseFloat(tickerData.data[symbol].acc_trade_value_24H),
+    ma20_d: calculateMA(dailyPrices, 20),
+    ma60_d: calculateMA(dailyPrices, 60),
+    ma120_d: calculateMA(dailyPrices, 120),
+    ma240_d: calculateMA(dailyPrices, 240),
+    ma120_m: calculateMA(monthlyPrices, 120),
+    candle_count_m: monthlyPrices.length,
+  });
+
+  const buildDailyConditionResults = async () => {
+    const tickerData = await getTickerData();
+    const resultsByCondition = createEmptyResults();
+    const queue = [...getScreenableSymbols(tickerData)];
     const concurrency = 15;
-    const queue = [...preFilteredSymbols];
 
     const workers = Array(concurrency).fill(null).map(async () => {
       while (queue.length > 0) {
@@ -156,21 +181,76 @@ async function startServer() {
         if (!symbol) break;
 
         try {
-          const [dailyCandleData, fourHourCandleData] = await Promise.all([
-            fetchJson(`https://api.bithumb.com/public/candlestick/${symbol}_KRW/24h`),
-            fetchJson(`https://api.bithumb.com/v1/candles/minutes/240?market=KRW-${symbol}&count=240`),
-          ]);
-
-          if (dailyCandleData.status !== "0000" || !Array.isArray(fourHourCandleData)) {
+          const dailyCandleData = await fetchJson(`https://api.bithumb.com/public/candlestick/${symbol}_KRW/24h`);
+          if (dailyCandleData.status !== "0000") {
             continue;
           }
 
           const dailyPrices = [...dailyCandleData.data].reverse().map((c) => parseFloat(c[2]));
-          const fourHourPrices = [...fourHourCandleData].map((c) => Number(c.trade_price));
           const weeklyPrices = toHigherTimeframePrices(dailyPrices, 7);
           const monthlyPrices = toHigherTimeframePrices(dailyPrices, 30);
 
-          if (monthlyPrices.length < 2 || fourHourPrices.length < 20) {
+          if (monthlyPrices.length < 2) {
+            continue;
+          }
+
+          const currentPrice = dailyPrices[0];
+          const rsi14 = calculateRSI(dailyPrices, 14);
+
+          if (rsi14 === null || rsi14 < 40) {
+            continue;
+          }
+
+          const row = buildRow(tickerData, symbol, currentPrice, dailyPrices, monthlyPrices);
+
+          if (isBullishAlignment(dailyPrices)) {
+            resultsByCondition[1].push(row);
+          }
+          if (isBullishAlignment(monthlyPrices) && isNearDailyMA20(dailyPrices, currentPrice)) {
+            resultsByCondition[2].push(row);
+          }
+          if (isBullishAlignment(weeklyPrices) && isNearDailyMA20(dailyPrices, currentPrice)) {
+            resultsByCondition[3].push(row);
+          }
+        } catch {}
+      }
+    });
+
+    await Promise.all(workers);
+
+    return {
+      generatedAt: Date.now(),
+      resultsByCondition,
+    };
+  };
+
+  const buildFourHourConditionResults = async () => {
+    const tickerData = await getTickerData();
+    const resultsByCondition = createEmptyResults();
+    const queue = [...getScreenableSymbols(tickerData)];
+    const concurrency = 15;
+
+    const workers = Array(concurrency).fill(null).map(async () => {
+      while (queue.length > 0) {
+        const symbol = queue.shift();
+        if (!symbol) break;
+
+        try {
+          const [dailyCandleData, hourlyCandleData] = await Promise.all([
+            fetchJson(`https://api.bithumb.com/public/candlestick/${symbol}_KRW/24h`),
+            fetchJson(`https://api.bithumb.com/public/candlestick/${symbol}_KRW/1h`),
+          ]);
+
+          if (dailyCandleData.status !== "0000" || hourlyCandleData.status !== "0000") {
+            continue;
+          }
+
+          const dailyPrices = [...dailyCandleData.data].reverse().map((c) => parseFloat(c[2]));
+          const hourlyPrices = [...hourlyCandleData.data].reverse().map((c) => parseFloat(c[2]));
+          const fourHourPrices = toHigherTimeframePrices(hourlyPrices, 4);
+          const monthlyPrices = toHigherTimeframePrices(dailyPrices, 30);
+
+          if (monthlyPrices.length < 2 || fourHourPrices.length < 240) {
             continue;
           }
 
@@ -182,43 +262,12 @@ async function startServer() {
             continue;
           }
 
-          const ma20Daily = calculateMA(dailyPrices, 20);
-          const ma60Daily = calculateMA(dailyPrices, 60);
-          const ma120Daily = calculateMA(dailyPrices, 120);
-          const ma240Daily = calculateMA(dailyPrices, 240);
           const ma20FourHour = calculateMA(fourHourPrices, 20);
           const ma120FourHour = calculateMA(fourHourPrices, 120);
           const ma240FourHour = calculateMA(fourHourPrices, 240);
-
-          const row: ScreenerRow = {
-            market: `${symbol}/KRW`,
-            korean_name: symbol,
-            english_name: symbol,
-            price: currentPrice,
-            change: parseFloat(tickerData.data[symbol].fluctate_rate_24H) / 100,
-            volume: parseFloat(tickerData.data[symbol].acc_trade_value_24H),
-            ma20_d: ma20Daily,
-            ma60_d: ma60Daily,
-            ma120_d: ma120Daily,
-            ma240_d: ma240Daily,
-            ma120_m: calculateMA(monthlyPrices, 120),
-            candle_count_m: monthlyPrices.length,
-          };
-
-          if (isBullishAlignment(dailyPrices)) {
-            resultsByCondition[1].push(row);
-          }
-
-          if (isBullishAlignment(monthlyPrices) && isNearDailyMA20(dailyPrices, currentPrice)) {
-            resultsByCondition[2].push(row);
-          }
-
-          if (isBullishAlignment(weeklyPrices) && isNearDailyMA20(dailyPrices, currentPrice)) {
-            resultsByCondition[3].push(row);
-          }
+          const row = buildRow(tickerData, symbol, currentPrice, dailyPrices, monthlyPrices);
 
           if (
-            currentFourHourPrice !== null &&
             isWithinPercentRange(currentFourHourPrice, ma20FourHour, 5, -1) &&
             isWithinPercentRange(currentFourHourPrice, ma120FourHour, 2, -10)
           ) {
@@ -226,7 +275,6 @@ async function startServer() {
           }
 
           if (
-            currentFourHourPrice !== null &&
             isWithinPercentRange(currentFourHourPrice, ma20FourHour, 5, -1) &&
             isWithinPercentRange(currentFourHourPrice, ma240FourHour, 2, -10)
           ) {
@@ -248,27 +296,50 @@ async function startServer() {
     };
   };
 
-  const getConditionResults = async (forceRefresh: boolean) => {
-    if (!forceRefresh && cachedResults && Date.now() - cachedResults.generatedAt < CACHE_TTL_MS) {
-      return cachedResults;
+  const getDailyResults = async (forceRefresh: boolean) => {
+    if (!forceRefresh && cachedDailyResults && Date.now() - cachedDailyResults.generatedAt < CACHE_TTL_MS) {
+      return cachedDailyResults;
     }
 
     if (forceRefresh) {
-      cachedResults = null;
+      cachedDailyResults = null;
     }
 
-    if (!inflightBuild) {
-      inflightBuild = buildAllConditionResults()
+    if (!inflightDailyBuild) {
+      inflightDailyBuild = buildDailyConditionResults()
         .then((results) => {
-          cachedResults = results;
+          cachedDailyResults = results;
           return results;
         })
         .finally(() => {
-          inflightBuild = null;
+          inflightDailyBuild = null;
         });
     }
 
-    return inflightBuild;
+    return inflightDailyBuild;
+  };
+
+  const getFourHourResults = async (forceRefresh: boolean) => {
+    if (!forceRefresh && cachedFourHourResults && Date.now() - cachedFourHourResults.generatedAt < CACHE_TTL_MS) {
+      return cachedFourHourResults;
+    }
+
+    if (forceRefresh) {
+      cachedFourHourResults = null;
+    }
+
+    if (!inflightFourHourBuild) {
+      inflightFourHourBuild = buildFourHourConditionResults()
+        .then((results) => {
+          cachedFourHourResults = results;
+          return results;
+        })
+        .finally(() => {
+          inflightFourHourBuild = null;
+        });
+    }
+
+    return inflightFourHourBuild;
   };
 
   // API Route: Fetch Crypto Data from Bithumb with Multi-Timeframe Analysis
@@ -276,11 +347,14 @@ async function startServer() {
     const requested = req.query.conditionId ? parseInt(req.query.conditionId.toString(), 10) : 1;
     const conditionId = ([1, 2, 3, 4, 5, 6].includes(requested) ? requested : 1) as ConditionId;
     const forceRefresh = req.query.refresh === "1";
+    const isDailyCondition = conditionId <= 3;
 
     res.setHeader("Content-Type", "application/json");
 
     try {
-      const { resultsByCondition, generatedAt } = await getConditionResults(forceRefresh);
+      const { resultsByCondition, generatedAt } = isDailyCondition
+        ? await getDailyResults(forceRefresh)
+        : await getFourHourResults(forceRefresh);
       const results = resultsByCondition[conditionId];
 
       const csvHeader = "Market,Price,MA20(D),MA60(D),MA120(D),MA240(D),MA120(M),MonthlyCandles\n";
