@@ -8,17 +8,21 @@
    ```bash
    npm install
    ```
-2. 포트 3000 사용 중인 프로세스 정리
+2. 로컬 작업 폴더 준비
+   ```bash
+   npm run setup:local
+   ```
+3. 포트 3000 사용 중인 프로세스 정리
    ```powershell
    Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue |
      Select-Object -ExpandProperty OwningProcess -Unique |
      ForEach-Object { Stop-Process -Id $_ -Force }
    ```
-3. 개발 서버 실행
+4. 개발 서버 실행
    ```bash
    npm run dev
    ```
-4. 브라우저에서 `http://localhost:3000` 접속
+5. 브라우저에서 `http://localhost:3000` 접속
 
 ## 조건
 
@@ -41,3 +45,7 @@
   npm run clean
   ```
 - 로컬 메모, 실험안, 백테스팅 파일은 `.local/` 아래에서만 관리
+- 백테스팅 폴더만 비우려면
+  ```bash
+  npm run clean:backtesting
+  ```

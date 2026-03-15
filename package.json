@@ -8,7 +8,9 @@
     "start": "node server.ts",
     "build": "vite build",
     "clean": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"if (Test-Path dist) { Remove-Item dist -Recurse -Force }; if (Test-Path public\\screener_result.csv) { Remove-Item public\\screener_result.csv -Force }; Get-ChildItem -Path . -Filter *.log -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue\"",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "setup:local": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"New-Item -ItemType Directory -Force .local,.local\\archive,.local\\backtesting | Out-Null\"",
+    "clean:backtesting": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"if (Test-Path .local\\backtesting) { Get-ChildItem .local\\backtesting -Exclude README.md -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue }\""
   },
   "dependencies": {
     "express": "^4.21.2",
