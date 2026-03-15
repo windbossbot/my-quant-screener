@@ -21,7 +21,6 @@ type ScreenerRow = {
 
 type ConditionId = 1 | 2 | 3 | 4 | 5;
 type ResultsByCondition = Record<ConditionId, ScreenerRow[]>;
-type FourHourRangeVariant = "120" | "240";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -34,8 +33,6 @@ async function startServer() {
   let cachedFourHourResults: { generatedAt: number; resultsByCondition: ResultsByCondition } | null = null;
   let inflightDailyBuild: Promise<{ generatedAt: number; resultsByCondition: ResultsByCondition }> | null = null;
   let inflightFourHourBuild: Promise<{ generatedAt: number; resultsByCondition: ResultsByCondition }> | null = null;
-  let cachedExperimentalFourHourResults: { generatedAt: number; resultsByCondition: ResultsByCondition } | null = null;
-  let inflightExperimentalFourHourBuild: Promise<{ generatedAt: number; resultsByCondition: ResultsByCondition }> | null = null;
 
   app.use(express.json());
 
@@ -114,14 +111,10 @@ async function startServer() {
     currentPrice: number,
     shortMa: number | null,
     longMa: number | null,
-    longVariant: FourHourRangeVariant,
   ) => {
-    const longUpper = longVariant === "240" ? 3 : 2;
-    const longLower = longVariant === "240" ? -12 : -10;
-
     return (
       isWithinPercentRange(currentPrice, shortMa, 5, -1) &&
-      isWithinPercentRange(currentPrice, longMa, longUpper, longLower)
+      isWithinPercentRange(currentPrice, longMa, 2, -10)
     );
   };
 
@@ -254,7 +247,7 @@ async function startServer() {
     };
   };
 
-  const buildFourHourConditionResults = async (rangeVariant: FourHourRangeVariant = "120") => {
+  const buildFourHourConditionResults = async () => {
     const tickerData = await getTickerData();
     const resultsByCondition = createEmptyResults();
     const queue = [...getScreenableSymbols(tickerData)];
@@ -302,13 +295,11 @@ async function startServer() {
 
           const ma20FourHour = calculateMA(fourHourPrices, 20);
           const ma120FourHour = calculateMA(fourHourPrices, 120);
-          const ma240FourHour = calculateMA(fourHourPrices, 240);
           const row = buildRow(tickerData, symbol, currentPrice, dailyPrices, monthlyPrices);
 
-          const rangeMovingAverage = rangeVariant === "240" ? ma240FourHour : ma120FourHour;
           if (
             meetsDailyConditionFourGuard &&
-            matchesFourHourRange(currentFourHourPrice, ma20FourHour, rangeMovingAverage, rangeVariant)
+            matchesFourHourRange(currentFourHourPrice, ma20FourHour, ma120FourHour)
           ) {
             resultsByCondition[4].push(row);
           }
@@ -351,49 +342,27 @@ async function startServer() {
     return inflightDailyBuild;
   };
 
-  const getFourHourResults = async (forceRefresh: boolean, rangeVariant: FourHourRangeVariant = "120") => {
-    const isExperimentalVariant = rangeVariant === "240";
-    const cachedResults = isExperimentalVariant ? cachedExperimentalFourHourResults : cachedFourHourResults;
-
-    if (!forceRefresh && cachedResults && Date.now() - cachedResults.generatedAt < CACHE_TTL_MS) {
-      return cachedResults;
+  const getFourHourResults = async (forceRefresh: boolean) => {
+    if (!forceRefresh && cachedFourHourResults && Date.now() - cachedFourHourResults.generatedAt < CACHE_TTL_MS) {
+      return cachedFourHourResults;
     }
 
     if (forceRefresh) {
-      if (isExperimentalVariant) {
-        cachedExperimentalFourHourResults = null;
-      } else {
-        cachedFourHourResults = null;
-      }
+      cachedFourHourResults = null;
     }
 
-    const inflightBuild = isExperimentalVariant ? inflightExperimentalFourHourBuild : inflightFourHourBuild;
-    if (!inflightBuild) {
-      const nextBuild = buildFourHourConditionResults(rangeVariant)
+    if (!inflightFourHourBuild) {
+      inflightFourHourBuild = buildFourHourConditionResults()
         .then((results) => {
-          if (isExperimentalVariant) {
-            cachedExperimentalFourHourResults = results;
-          } else {
-            cachedFourHourResults = results;
-          }
+          cachedFourHourResults = results;
           return results;
         })
         .finally(() => {
-          if (isExperimentalVariant) {
-            inflightExperimentalFourHourBuild = null;
-          } else {
-            inflightFourHourBuild = null;
-          }
+          inflightFourHourBuild = null;
         });
-
-      if (isExperimentalVariant) {
-        inflightExperimentalFourHourBuild = nextBuild;
-      } else {
-        inflightFourHourBuild = nextBuild;
-      }
     }
 
-    return isExperimentalVariant ? inflightExperimentalFourHourBuild! : inflightFourHourBuild!;
+    return inflightFourHourBuild;
   };
 
   // API Route: Fetch Crypto Data from Bithumb with Multi-Timeframe Analysis
@@ -402,14 +371,13 @@ async function startServer() {
     const conditionId = ([1, 2, 3, 4, 5].includes(requested) ? requested : 1) as ConditionId;
     const forceRefresh = req.query.refresh === "1";
     const isDailyCondition = conditionId <= 3;
-    const rangeVariant = req.query.variant === "240" ? "240" : "120";
 
     res.setHeader("Content-Type", "application/json");
 
     try {
       const { resultsByCondition, generatedAt } = isDailyCondition
         ? await getDailyResults(forceRefresh)
-        : await getFourHourResults(forceRefresh, rangeVariant);
+        : await getFourHourResults(forceRefresh);
       const results = resultsByCondition[conditionId];
 
       const csvHeader = "Market,Price,MA20(D),MA60(D),MA120(D),MA240(D),MA120(M),MonthlyCandles\n";
