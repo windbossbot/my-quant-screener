@@ -32,8 +32,33 @@
 1. `일봉 정배열`
 2. `월봉 정배열`
 3. `주봉 정배열`
-4. `20·120선 범위`
-5. `20·240선 범위`
+4. `4시간 20·120선 범위`
+5. `4시간 20·240선 범위`
+6. `4시간봉 정배열`
+
+## 작업 원칙
+
+- 작업 시작 전 `3000` 포트를 쓰는 기존 프로세스가 있으면 먼저 종료
+- 작업 중 임시 실행한 로컬 서버와 백그라운드 프로세스는 끝나면 반드시 종료
+- 결과 확인 후 불필요한 로그, 생성 CSV, 빌드 산출물은 `npm run clean`으로 정리
+- 강제 최신 데이터가 필요할 때만 화면의 `Reload`를 사용
+
+## 종료 체크리스트
+
+1. 로컬 서버 종료
+   ```powershell
+   Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue |
+     Select-Object -ExpandProperty OwningProcess -Unique |
+     ForEach-Object { Stop-Process -Id $_ -Force }
+   ```
+2. 남은 Node 프로세스 확인 후 필요 시 종료
+   ```powershell
+   Get-Process node -ErrorAction SilentlyContinue
+   ```
+3. 산출물 정리
+   ```bash
+   npm run clean
+   ```
 
 ## 정리
 
