@@ -1,33 +1,57 @@
-# Quant Screener - 독립 실행 매뉴얼
+# Quant Screener
 
-이 프로그램은 AI Studio 외부에서도 독립적으로 실행할 수 있도록 설계되었습니다.
+빗썸 공개 데이터를 기반으로 조건별 코인 후보를 추려주는 스크리너입니다.
 
-## 1. 내 PC에서 실행하기 (Local)
+## 구조
 
-1. **Node.js 설치**: [nodejs.org](https://nodejs.org/)에서 LTS 버전을 다운로드하여 설치합니다.
-2. **코드 다운로드**: 현재 프로젝트의 모든 파일을 내 PC의 특정 폴더에 복사합니다.
-3. **터미널 실행**: 해당 폴더에서 터미널(CMD 또는 PowerShell)을 엽니다.
-4. **의존성 설치**:
+- `server.ts`: 빗썸 데이터 조회, 조건 판정, CSV 생성
+- `src/App.tsx`: 조건 선택 UI, 검색, 정렬, 결과 표시
+- `public/`: PWA 설정 파일과 생성 CSV 위치
+
+## 실행
+
+1. Node.js LTS 설치
+2. 의존성 설치
    ```bash
    npm install
    ```
-5. **프로그램 실행**:
+3. 포트 3000 사용 중인 프로세스 정리
+   ```powershell
+   Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue |
+     Select-Object -ExpandProperty OwningProcess -Unique |
+     ForEach-Object { Stop-Process -Id $_ -Force }
+   ```
+4. 개발 서버 실행
    ```bash
    npm run dev
    ```
-6. **접속**: 브라우저를 열고 `http://localhost:3000`에 접속합니다.
+5. 브라우저에서 `http://localhost:3000` 접속
 
-## 2. 프로그램처럼 설치하기 (PWA)
+## 조건
 
-1. 프로그램을 실행한 상태에서 크롬(Chrome) 또는 엣지(Edge) 브라우저로 접속합니다.
-2. 주소창 우측의 **'앱 설치' 아이콘**(모니터 모양에 화살표)을 클릭합니다.
-3. '설치'를 누르면 바탕화면에 아이콘이 생기며, 이후에는 웹 브라우저 없이 독립된 창으로 실행됩니다.
+1. `일봉 정배열`
+2. `월봉 정배열`
+3. `주봉 정배열`
+4. `20·120선 범위`
+5. `20·240선 범위`
 
-## 3. 수정 및 업데이트
+## 정리
 
-* **직접 수정**: `server.ts` (스캔 로직) 또는 `src/App.tsx` (화면 UI) 파일을 메모장이나 VS Code로 열어 수정하면 즉시 반영됩니다.
-* **AI 활용**: 수정하고 싶은 내용을 이 파일들과 함께 다른 AI(ChatGPT 등)에게 전달하여 코드를 업데이트해달라고 요청하면 됩니다.
+- 산출물, 로그, 생성 CSV 정리
+  ```bash
+  npm run clean
+  ```
+- 서버 종료 후 남은 Node 프로세스 정리
+  ```powershell
+  Get-Process node -ErrorAction SilentlyContinue | Stop-Process -Force
+  ```
 
-## 4. 서버에 올리기 (24시간 가동)
+## 수정 포인트
 
-* **Railway.app** 또는 **Render.com** 같은 서비스에 이 폴더를 업로드하면, PC를 꺼두어도 언제 어디서든 접속 가능한 본인만의 웹 주소가 생성됩니다.
+- 조건 로직 수정: `server.ts`
+- 화면 설명 수정: `src/App.tsx`
+- 스타일 수정: `src/index.css`
+
+## 배포
+
+`Railway` 또는 `Render` 같은 Node 지원 서비스에 그대로 올릴 수 있습니다.
