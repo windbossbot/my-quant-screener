@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Download, TrendingUp, TrendingDown, Coins, Search } from "lucide-react";
+import { Download, RefreshCw, TrendingUp, TrendingDown, Coins, Search } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
 interface CryptoData {
@@ -31,14 +31,48 @@ export default function App() {
     direction: 'desc'
   });
 
-  const fetchData = async () => {
+  const getCacheKey = (conditionId: number) => `quant-screener-condition-${conditionId}`;
+
+  const readCachedData = (conditionId: number) => {
+    const cached = sessionStorage.getItem(getCacheKey(conditionId));
+    if (!cached) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(cached) as { data: CryptoData[]; lastUpdated: string };
+    } catch {
+      sessionStorage.removeItem(getCacheKey(conditionId));
+      return null;
+    }
+  };
+
+  const writeCachedData = (conditionId: number, nextData: CryptoData[], updatedAt: string) => {
+    sessionStorage.setItem(
+      getCacheKey(conditionId),
+      JSON.stringify({ data: nextData, lastUpdated: updatedAt }),
+    );
+  };
+
+  const fetchData = async (forceRefresh = false) => {
+    if (!forceRefresh) {
+      const cached = readCachedData(selectedCondition);
+      if (cached) {
+        setData(cached.data);
+        setLastUpdated(cached.lastUpdated);
+        return;
+      }
+    }
+
     setLoading(true);
     try {
       const response = await fetch(`/api/crypto?conditionId=${selectedCondition}`);
       const result = await response.json();
       if (result.success) {
+        const updatedAt = new Date().toLocaleTimeString();
         setData(result.data);
-        setLastUpdated(new Date().toLocaleTimeString());
+        setLastUpdated(updatedAt);
+        writeCachedData(selectedCondition, result.data, updatedAt);
       }
     } catch (error) {
       console.error("Failed to fetch data:", error);
@@ -50,6 +84,11 @@ export default function App() {
   useEffect(() => {
     fetchData();
   }, [selectedCondition]);
+
+  const handleReload = () => {
+    sessionStorage.removeItem(getCacheKey(selectedCondition));
+    fetchData(true);
+  };
 
   const handleSort = (key: keyof CryptoData) => {
     let direction: 'asc' | 'desc' = 'desc';
@@ -85,6 +124,10 @@ export default function App() {
 
   const sortedData = getSortedData();
   const selectedConditionMeta = CONDITIONS.find((condition) => condition.id === selectedCondition);
+  const openBithumbMarket = (market: string) => {
+    const symbol = market.split("/")[0];
+    window.open(`https://www.bithumb.com/react/trade/order/${symbol}-KRW`, "_blank", "noopener,noreferrer");
+  };
 
   const SortIcon = ({ column }: { column: keyof CryptoData }) => {
     if (sortConfig.key !== column) return <div className="w-3 h-3 opacity-20 ml-1 inline-block" />;
@@ -137,6 +180,13 @@ export default function App() {
         </div>
 
         <div className="flex flex-wrap gap-3">
+          <button
+            onClick={handleReload}
+            className="flex items-center gap-2 px-6 py-3 border border-[#141414] rounded-full hover:bg-[#141414] hover:text-[#E4E3E0] transition-all cursor-pointer"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            <span className="text-sm font-medium uppercase tracking-wider">Reload</span>
+          </button>
           <a 
             href="/screener_result.csv" 
             download
@@ -197,6 +247,7 @@ export default function App() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95 }}
                 transition={{ delay: index * 0.01 }}
+                onClick={() => openBithumbMarket(item.market)}
                 className="grid grid-cols-12 gap-4 p-4 border-b border-[#141414]/10 hover:bg-[#141414] hover:text-[#E4E3E0] transition-colors group cursor-pointer"
               >
                 <div className="col-span-1 data-value opacity-50">{(index + 1).toString().padStart(2, '0')}</div>

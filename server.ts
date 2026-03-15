@@ -16,6 +16,7 @@ async function startServer() {
   // API Route: Fetch Crypto Data from Bithumb with Multi-Timeframe Analysis
   app.get("/api/crypto", async (req, res) => {
     const conditionId = req.query.conditionId ? parseInt(req.query.conditionId) : 1;
+    const needsFourHourData = [4, 5, 6].includes(conditionId);
     
     res.setHeader('Content-Type', 'application/json');
     
@@ -95,11 +96,6 @@ async function startServer() {
         return currentPrice >= lowerLimit && currentPrice <= upperLimit;
       };
 
-      // Build a simple 4h close series from 1h closes while keeping newest price first.
-      const toFourHourPrices = (hourlyPrices) => {
-        return toHigherTimeframePrices(hourlyPrices, 4);
-      };
-
       // RSI (Wilder) using closes array where prices[0] is the most recent close
       const calculateRSI = (prices, period = 14) => {
         if (!Array.isArray(prices) || prices.length < period + 1) return null;
@@ -139,27 +135,27 @@ async function startServer() {
           if (!symbol) break;
 
           try {
-            const [dailyCandleData, hourlyCandleData] = await Promise.all([
-              fetchJson(`https://api.bithumb.com/public/candlestick/${symbol}_KRW/24h`),
-              fetchJson(`https://api.bithumb.com/public/candlestick/${symbol}_KRW/1h`),
-            ]);
+            const dailyCandleData = await fetchJson(`https://api.bithumb.com/public/candlestick/${symbol}_KRW/24h`);
+            const fourHourCandleData = needsFourHourData
+              ? await fetchJson(`https://api.bithumb.com/v1/candles/minutes/240?market=KRW-${symbol}&count=240`)
+              : null;
 
-            if (dailyCandleData.status === "0000" && hourlyCandleData.status === "0000") {
+            const hasValidFourHourData = !needsFourHourData || Array.isArray(fourHourCandleData);
+            if (dailyCandleData.status === "0000" && hasValidFourHourData) {
               const dailyCandles = dailyCandleData.data;
-              const hourlyCandles = hourlyCandleData.data;
               const reversedDaily = [...dailyCandles].reverse();
-              const reversedHourly = [...hourlyCandles].reverse();
               const dailyPrices = reversedDaily.map(c => parseFloat(c[2]));
-              const hourlyPrices = reversedHourly.map(c => parseFloat(c[2]));
-              const fourHourPrices = toFourHourPrices(hourlyPrices);
+              const fourHourPrices = needsFourHourData
+                ? [...fourHourCandleData].map(c => Number(c.trade_price))
+                : [];
               const weeklyPrices = toHigherTimeframePrices(dailyPrices, 7);
               const monthlyPrices = toHigherTimeframePrices(dailyPrices, 30);
 
               const monthlyMin = 2;
-              if (monthlyPrices.length >= monthlyMin && fourHourPrices.length >= 20) {
+              if (monthlyPrices.length >= monthlyMin && (!needsFourHourData || fourHourPrices.length >= 20)) {
                 const currentPrice = dailyPrices[0];
                 const rsi14 = calculateRSI(dailyPrices, 14);
-                const currentFourHourPrice = fourHourPrices[0];
+                const currentFourHourPrice = needsFourHourData ? fourHourPrices[0] : null;
 
                 // Common Filter: RSI must be >= 40
                 if (rsi14 === null || rsi14 < 40) {
@@ -198,6 +194,7 @@ async function startServer() {
                   const ma120 = calculateMA(fourHourPrices, 120);
 
                   if (
+                    currentFourHourPrice === null ||
                     !isWithinPercentRange(currentFourHourPrice, ma20, 5, -1) ||
                     !isWithinPercentRange(currentFourHourPrice, ma120, 2, -10)
                   ) {
@@ -210,6 +207,7 @@ async function startServer() {
                   const ma240 = calculateMA(fourHourPrices, 240);
 
                   if (
+                    currentFourHourPrice === null ||
                     !isWithinPercentRange(currentFourHourPrice, ma20, 5, -1) ||
                     !isWithinPercentRange(currentFourHourPrice, ma240, 2, -10)
                   ) {
