@@ -41,7 +41,7 @@ async function startServer() {
 
   const calculateMA = (prices: number[], period: number) => {
     if (prices.length < period) return null;
-    const sum = prices.slice(0, period).reduce((acc, p) => acc + p, 0);
+    const sum = prices.slice(-period).reduce((acc, p) => acc + p, 0);
     return sum / period;
   };
 
@@ -55,7 +55,10 @@ async function startServer() {
   const toHigherTimeframePrices = (prices: number[], step: number) => {
     const higherTimeframePrices = [];
     for (let i = 0; i < prices.length; i += step) {
-      higherTimeframePrices.push(prices[i]);
+      const chunk = prices.slice(i, i + step);
+      if (chunk.length > 0) {
+        higherTimeframePrices.push(chunk[chunk.length - 1]);
+      }
     }
     return higherTimeframePrices;
   };
@@ -124,7 +127,7 @@ async function startServer() {
 
   const calculateRSI = (prices: number[], period = 14) => {
     if (!Array.isArray(prices) || prices.length < period + 1) return null;
-    const closes = [...prices].reverse();
+    const closes = prices;
 
     let gainSum = 0;
     let lossSum = 0;
@@ -213,7 +216,7 @@ async function startServer() {
             continue;
           }
 
-          const dailyPrices = [...dailyCandleData.data].reverse().map((c) => parseFloat(c[2]));
+          const dailyPrices = dailyCandleData.data.map((c) => parseFloat(c[2]));
           const weeklyPrices = toHigherTimeframePrices(dailyPrices, 7);
           const monthlyPrices = toHigherTimeframePrices(dailyPrices, 30);
 
@@ -221,7 +224,7 @@ async function startServer() {
             continue;
           }
 
-          const currentPrice = dailyPrices[0];
+          const currentPrice = dailyPrices[dailyPrices.length - 1];
           const rsi14 = calculateRSI(dailyPrices, 14);
 
           if (rsi14 === null || rsi14 < 40) {
@@ -269,14 +272,14 @@ async function startServer() {
             continue;
           }
 
-          const dailyPrices = [...dailyCandleData.data].reverse().map((c) => parseFloat(c[2]));
+          const dailyPrices = dailyCandleData.data.map((c) => parseFloat(c[2]));
           const monthlyPrices = toHigherTimeframePrices(dailyPrices, 30);
 
           if (monthlyPrices.length < 2) {
             continue;
           }
 
-          const currentPrice = dailyPrices[0];
+          const currentPrice = dailyPrices[dailyPrices.length - 1];
           const rsi14 = calculateRSI(dailyPrices, 14);
 
           if (rsi14 === null || rsi14 < 40) {
@@ -289,13 +292,13 @@ async function startServer() {
             continue;
           }
 
-          const hourlyPrices = [...hourlyCandleData.data].reverse().map((c) => parseFloat(c[2]));
+          const hourlyPrices = hourlyCandleData.data.map((c) => parseFloat(c[2]));
           const fourHourPrices = toHigherTimeframePrices(hourlyPrices, 4);
           if (fourHourPrices.length < 240) {
             continue;
           }
 
-          const currentFourHourPrice = fourHourPrices[0];
+          const currentFourHourPrice = fourHourPrices[fourHourPrices.length - 1];
 
           const ma20FourHour = calculateMA(fourHourPrices, 20);
           const ma120FourHour = calculateMA(fourHourPrices, 120);
