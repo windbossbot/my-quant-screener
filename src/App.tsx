@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Download, RefreshCw, TrendingUp, TrendingDown, Coins, Search } from "lucide-react";
+import { Download, RefreshCw, TrendingUp, TrendingDown, Coins, Search, Star } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
 interface CryptoData {
@@ -27,6 +27,7 @@ export default function App() {
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCondition, setSelectedCondition] = useState(1);
+  const [favorites, setFavorites] = useState<string[]>([]);
   const [sortConfig, setSortConfig] = useState<{ key: keyof CryptoData | null, direction: 'asc' | 'desc' }>({
     key: null,
     direction: 'desc'
@@ -34,6 +35,7 @@ export default function App() {
 
   const getCacheKey = (conditionId: number) => `quant-screener-condition-${conditionId}`;
   const getPendingKey = (conditionId: number) => `quant-screener-pending-${conditionId}`;
+  const favoritesKey = "quant-screener-favorites";
 
   const readCachedData = (conditionId: number) => {
     const cached = sessionStorage.getItem(getCacheKey(conditionId));
@@ -54,6 +56,21 @@ export default function App() {
       getCacheKey(conditionId),
       JSON.stringify({ data: nextData, lastUpdated: updatedAt }),
     );
+  };
+
+  const readFavorites = () => {
+    const cached = sessionStorage.getItem(favoritesKey);
+    if (!cached) {
+      return [];
+    }
+
+    try {
+      const parsed = JSON.parse(cached) as string[];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      sessionStorage.removeItem(favoritesKey);
+      return [];
+    }
   };
 
   const fetchConditionData = async (conditionId: number, forceRefresh = false) => {
@@ -121,6 +138,10 @@ export default function App() {
     fetchData();
   }, [selectedCondition]);
 
+  useEffect(() => {
+    setFavorites(readFavorites());
+  }, []);
+
   const handleReload = () => {
     CONDITIONS.forEach((condition) => {
       sessionStorage.removeItem(getCacheKey(condition.id));
@@ -135,6 +156,15 @@ export default function App() {
       direction = 'asc';
     }
     setSortConfig({ key, direction });
+  };
+
+  const toggleFavorite = (market: string) => {
+    const nextFavorites = favorites.includes(market)
+      ? favorites.filter((favorite) => favorite !== market)
+      : [...favorites, market];
+
+    setFavorites(nextFavorites);
+    sessionStorage.setItem(favoritesKey, JSON.stringify(nextFavorites));
   };
 
   const getSortedData = () => {
@@ -162,11 +192,9 @@ export default function App() {
   };
 
   const sortedData = getSortedData();
+  const favoriteItems = sortedData.filter((item) => favorites.includes(item.market));
+  const otherItems = sortedData.filter((item) => !favorites.includes(item.market));
   const selectedConditionMeta = CONDITIONS.find((condition) => condition.id === selectedCondition);
-  const openBithumbMarket = (market: string) => {
-    const symbol = market.split("/")[0];
-    window.open(`https://www.bithumb.com/react/trade/order/${symbol}-KRW`, "bithumb-trade-window", "noopener,noreferrer");
-  };
 
   const SortIcon = ({ column }: { column: keyof CryptoData }) => {
     if (sortConfig.key !== column) return <div className="w-3 h-3 opacity-20 ml-1 inline-block" />;
@@ -174,6 +202,45 @@ export default function App() {
       <TrendingUp className="w-3 h-3 ml-1 inline-block rotate-0 transition-transform" /> : 
       <TrendingDown className="w-3 h-3 ml-1 inline-block rotate-0 transition-transform" />;
   };
+
+  const renderRow = (item: CryptoData, index: number, highlighted = false) => (
+    <motion.div
+      key={item.market}
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      transition={{ delay: index * 0.01 }}
+      className={`grid grid-cols-12 gap-4 p-4 border-b border-[#141414]/10 transition-colors group ${highlighted ? "bg-[#141414]/5" : ""}`}
+    >
+      <div className="col-span-1 flex items-center gap-2 data-value opacity-50">
+        <button
+          type="button"
+          onClick={() => toggleFavorite(item.market)}
+          className="cursor-pointer opacity-70 hover:opacity-100 transition-opacity"
+          aria-label={favorites.includes(item.market) ? "Remove favorite" : "Add favorite"}
+        >
+          <Star
+            className={`w-4 h-4 ${favorites.includes(item.market) ? "fill-[#141414] text-[#141414]" : "text-[#141414]/40"}`}
+          />
+        </button>
+        <span>{(index + 1).toString().padStart(2, '0')}</span>
+      </div>
+      <div className="col-span-4 flex flex-col">
+        <span className="font-bold tracking-tight">{item.korean_name}</span>
+        <span className="text-[10px] font-mono opacity-50">{item.market}</span>
+      </div>
+      <div className="col-span-2 text-right data-value font-medium">
+        {item.price.toLocaleString()}
+      </div>
+      <div className={`col-span-2 text-right flex items-center justify-end gap-1 font-mono text-xs ${item.change > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+        {item.change > 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+        {(item.change * 100).toFixed(2)}%
+      </div>
+      <div className="col-span-3 text-right data-value opacity-70">
+        ₩{(item.volume / 100000000).toFixed(1)}B
+      </div>
+    </motion.div>
+  );
 
   return (
     <div className="min-h-screen bg-[#E4E3E0] text-[#141414] font-sans p-4 md:p-8">
@@ -254,6 +321,26 @@ export default function App() {
           </div>
         </div>
 
+        {favoriteItems.length > 0 && (
+          <div className="mb-8 rounded-2xl border border-[#141414]/15 p-4">
+            <div className="mb-3 text-[11px] font-mono uppercase tracking-widest opacity-50">
+              Favorites In This Session
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {favoriteItems.map((item) => (
+                <button
+                  key={item.market}
+                  type="button"
+                  onClick={() => setSearchTerm(item.korean_name)}
+                  className="rounded-full border border-[#141414]/20 px-3 py-1 text-xs hover:bg-[#141414] hover:text-[#E4E3E0] transition-colors cursor-pointer"
+                >
+                  {item.korean_name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-12 gap-4 mb-4 px-4">
           <div className="col-span-1 col-header">#</div>
           <div className="col-span-4 col-header">Asset</div>
@@ -279,33 +366,8 @@ export default function App() {
 
         <div className="border-t border-[#141414]">
           <AnimatePresence mode="popLayout">
-            {sortedData.map((item, index) => (
-              <motion.div 
-                key={item.market}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                transition={{ delay: index * 0.01 }}
-                onClick={() => openBithumbMarket(item.market)}
-                className="grid grid-cols-12 gap-4 p-4 border-b border-[#141414]/10 hover:bg-[#141414] hover:text-[#E4E3E0] transition-colors group cursor-pointer"
-              >
-                <div className="col-span-1 data-value opacity-50">{(index + 1).toString().padStart(2, '0')}</div>
-                <div className="col-span-4 flex flex-col">
-                  <span className="font-bold tracking-tight">{item.korean_name}</span>
-                  <span className="text-[10px] font-mono opacity-50 group-hover:opacity-70">{item.market}</span>
-                </div>
-                <div className="col-span-2 text-right data-value font-medium">
-                  {item.price.toLocaleString()}
-                </div>
-                <div className={`col-span-2 text-right flex items-center justify-end gap-1 font-mono text-xs ${item.change > 0 ? 'text-emerald-600 group-hover:text-emerald-400' : 'text-rose-600 group-hover:text-rose-400'}`}>
-                  {item.change > 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                  {(item.change * 100).toFixed(2)}%
-                </div>
-                <div className="col-span-3 text-right data-value opacity-70 group-hover:opacity-100">
-                  ₩{(item.volume / 100000000).toFixed(1)}B
-                </div>
-              </motion.div>
-            ))}
+            {favoriteItems.map((item, index) => renderRow(item, index, true))}
+            {otherItems.map((item, index) => renderRow(item, favoriteItems.length + index))}
           </AnimatePresence>
 
           {sortedData.length === 0 && !loading && (
