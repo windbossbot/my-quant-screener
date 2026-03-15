@@ -11,6 +11,8 @@ interface CryptoData {
   volume: number;
 }
 
+type CachedConditionData = { data: CryptoData[]; lastUpdated: string };
+
 const CONDITIONS = [
   { id: 1, title: "일봉 정배열", description: "일봉 20일선, 60일선, 120일선이 상승 정배열인 종목" },
   { id: 2, title: "월봉 정배열", description: "월봉이 정배열이고 현재가가 일봉 20일선 위아래 5% 이내인 종목" },
@@ -41,7 +43,7 @@ export default function App() {
     }
 
     try {
-      return JSON.parse(cached) as { data: CryptoData[]; lastUpdated: string };
+      return JSON.parse(cached) as CachedConditionData;
     } catch {
       sessionStorage.removeItem(getCacheKey(conditionId));
       return null;
@@ -69,15 +71,23 @@ export default function App() {
 
     sessionStorage.setItem(getPendingKey(conditionId), "true");
     try {
-      const response = await fetch(`/api/crypto?conditionId=${conditionId}`);
+      const refreshQuery = forceRefresh ? "&refresh=1" : "";
+      const response = await fetch(`/api/crypto?conditionId=${conditionId}${refreshQuery}`);
       const result = await response.json();
       if (!result.success) {
         return null;
       }
 
       const updatedAt = new Date().toLocaleTimeString();
-      writeCachedData(conditionId, result.data, updatedAt);
-      return { data: result.data as CryptoData[], lastUpdated: updatedAt };
+      if (result.allData) {
+        Object.entries(result.allData).forEach(([key, value]) => {
+          writeCachedData(Number(key), value as CryptoData[], updatedAt);
+        });
+      } else {
+        writeCachedData(conditionId, result.data, updatedAt);
+      }
+
+      return readCachedData(conditionId) ?? { data: result.data as CryptoData[], lastUpdated: updatedAt };
     } catch (error) {
       console.error("Failed to fetch data:", error);
       return null;
@@ -113,42 +123,12 @@ export default function App() {
   }, [selectedCondition]);
 
   const handleReload = () => {
-    sessionStorage.removeItem(getCacheKey(selectedCondition));
+    CONDITIONS.forEach((condition) => {
+      sessionStorage.removeItem(getCacheKey(condition.id));
+      sessionStorage.removeItem(getPendingKey(condition.id));
+    });
     fetchData(true);
   };
-
-  useEffect(() => {
-    const remainingConditions = CONDITIONS
-      .map((condition) => condition.id)
-      .filter((conditionId) => conditionId !== selectedCondition && !readCachedData(conditionId));
-
-    if (remainingConditions.length === 0) {
-      return;
-    }
-
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-
-    const prefetchNext = async (index: number) => {
-      if (cancelled || index >= remainingConditions.length) {
-        return;
-      }
-
-      await fetchConditionData(remainingConditions[index]);
-      if (!cancelled) {
-        timer = setTimeout(() => prefetchNext(index + 1), 250);
-      }
-    };
-
-    timer = setTimeout(() => prefetchNext(0), 500);
-
-    return () => {
-      cancelled = true;
-      if (timer) {
-        clearTimeout(timer);
-      }
-    };
-  }, [selectedCondition]);
 
   const handleSort = (key: keyof CryptoData) => {
     let direction: 'asc' | 'desc' = 'desc';
