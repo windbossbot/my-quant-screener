@@ -19,7 +19,7 @@ type ScreenerRow = {
   candle_count_m: number;
 };
 
-type ConditionId = 1 | 2 | 3 | 4 | 5 | 6;
+type ConditionId = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 type ResultsByCondition = Record<ConditionId, ScreenerRow[]>;
 type LogLevel = "DEBUG" | "INFO" | "ERROR";
 
@@ -234,6 +234,7 @@ async function startServer() {
       4: [],
       5: [],
       6: [],
+      7: [],
     });
 
   const getScreenableSymbols = (tickerData: any) => {
@@ -356,6 +357,7 @@ async function startServer() {
 
           const meetsDailyConditionFourGuard = isAboveDailyMAThreshold(dailyPrices, 20, currentPrice, -3);
           const meetsDailyConditionSixGuard = isAboveDailyMA(dailyPrices, 30, currentPrice);
+          const meetsDailyConditionSevenGuard = isAboveDailyMA(dailyPrices, 20, currentPrice);
           const hourlyCandleData = await fetchJson(`https://api.bithumb.com/public/candlestick/${symbol}_KRW/1h`);
           if (hourlyCandleData.status !== "0000") {
             continue;
@@ -390,6 +392,13 @@ async function startServer() {
             matchesFourHourRange(currentFourHourPrice, ma30FourHour, ma120FourHour)
           ) {
             resultsByCondition[6].push(row);
+          }
+
+          if (
+            meetsDailyConditionSevenGuard &&
+            matchesFourHourRange(currentFourHourPrice, ma30FourHour, ma120FourHour)
+          ) {
+            resultsByCondition[7].push(row);
           }
         } catch (error) {
           logEvent("DEBUG", "four_hour_symbol_failed", {
@@ -457,7 +466,7 @@ async function startServer() {
   // API Route: Fetch Crypto Data from Bithumb with Multi-Timeframe Analysis
   app.get("/api/crypto", async (req, res) => {
     const requested = req.query.conditionId ? parseInt(req.query.conditionId.toString(), 10) : 1;
-    const conditionId = ([1, 2, 3, 4, 5, 6].includes(requested) ? requested : 1) as ConditionId;
+    const conditionId = ([1, 2, 3, 4, 5, 6, 7].includes(requested) ? requested : 1) as ConditionId;
     const forceRefresh = req.query.refresh === "1";
     const isDailyCondition = conditionId <= 3;
 
