@@ -147,13 +147,13 @@ async function startServer() {
     return currentPrice >= lowerLimit && currentPrice <= upperLimit;
   };
 
-  const isAboveDailyMA20Threshold = (prices: number[], currentPrice: number, lowerPercent: number) => {
-    const ma20 = calculateMA(prices, 20);
-    if (ma20 === null) {
+  const isAboveDailyMA30Threshold = (prices: number[], currentPrice: number, lowerPercent: number) => {
+    const ma30 = calculateMA(prices, 30);
+    if (ma30 === null) {
       return false;
     }
 
-    const lowerLimit = ma20 * (1 + lowerPercent / 100);
+    const lowerLimit = ma30 * (1 + lowerPercent / 100);
     return currentPrice >= lowerLimit;
   };
 
@@ -344,7 +344,7 @@ async function startServer() {
             continue;
           }
 
-          const meetsDailyConditionFourGuard = isAboveDailyMA20Threshold(dailyPrices, currentPrice, -3);
+          const meetsDailyConditionFourGuard = isAboveDailyMA30Threshold(dailyPrices, currentPrice, -3);
           const hourlyCandleData = await fetchJson(`https://api.bithumb.com/public/candlestick/${symbol}_KRW/1h`);
           if (hourlyCandleData.status !== "0000") {
             continue;
@@ -358,13 +358,13 @@ async function startServer() {
 
           const currentFourHourPrice = fourHourPrices[fourHourPrices.length - 1];
 
-          const ma20FourHour = calculateMA(fourHourPrices, 20);
+          const ma30FourHour = calculateMA(fourHourPrices, 30);
           const ma120FourHour = calculateMA(fourHourPrices, 120);
           const row = buildRow(tickerData, symbol, currentPrice, dailyPrices, monthlyPrices);
 
           if (
             meetsDailyConditionFourGuard &&
-            matchesFourHourRange(currentFourHourPrice, ma20FourHour, ma120FourHour)
+            matchesFourHourRange(currentFourHourPrice, ma30FourHour, ma120FourHour)
           ) {
             resultsByCondition[4].push(row);
           }
