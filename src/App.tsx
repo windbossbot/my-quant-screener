@@ -228,8 +228,8 @@ export default function App() {
         <span>{(index + 1).toString().padStart(2, '0')}</span>
       </div>
       <div className="col-span-4 flex flex-col">
-        <span className="font-bold tracking-tight">{item.market.split("/")[0]}</span>
-        <span className="text-[10px] font-mono opacity-50">{item.korean_name}</span>
+        <span className="text-lg font-semibold tracking-normal leading-tight">{item.market.split("/")[0]}</span>
+        <span className="mt-1 text-xs font-sans font-medium leading-tight opacity-65">{item.korean_name}</span>
       </div>
       <div className="col-span-2 text-right data-value font-medium">
         {item.price.toLocaleString()}
