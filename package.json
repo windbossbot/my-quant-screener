@@ -4,8 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx server.ts",
-    "start": "node server.ts",
+    "preflight": "node scripts/preflight.mjs",
+    "dev": "npm run preflight && tsx server.ts",
+    "start": "npm run preflight && node server.ts",
     "build": "vite build",
     "clean": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"if (Test-Path dist) { Remove-Item dist -Recurse -Force }; if (Test-Path public\\screener_result.csv) { Remove-Item public\\screener_result.csv -Force }; Get-ChildItem -Path . -Filter *.log -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue\"",
     "lint": "tsc --noEmit",

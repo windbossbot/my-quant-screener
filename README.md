@@ -8,21 +8,25 @@
    ```bash
    npm install
    ```
-2. 로컬 작업 폴더 준비
+2. 환경변수 템플릿 복사
+   ```bash
+   copy .env.example .env
+   ```
+3. 로컬 작업 폴더 준비
    ```bash
    npm run setup:local
    ```
-3. 포트 3000 사용 중인 프로세스 정리
+4. 포트 3000 사용 중인 프로세스 정리
    ```powershell
    Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue |
      Select-Object -ExpandProperty OwningProcess -Unique |
      ForEach-Object { Stop-Process -Id $_ -Force }
    ```
-4. 개발 서버 실행
+5. 개발 서버 실행
    ```bash
    npm run dev
    ```
-5. 브라우저에서 `http://localhost:3000` 접속
+6. 브라우저에서 `http://localhost:3000` 접속
 
 ## 조건
 
@@ -34,6 +38,7 @@
 
 ## 정리
 
+- 실행 전 포트 충돌은 `npm run preflight`가 먼저 확인
 - 로컬 서버 종료
   ```powershell
   Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue |
@@ -44,6 +49,7 @@
   ```bash
   npm run clean
   ```
+- 구조화 로그 파일은 `logs/app-YYYY-MM-DD.log`
 - 화면 즐겨찾기는 브라우저 세션 동안만 유지
 - 로컬 메모, 실험안, 백테스팅 파일은 `.local/` 아래에서만 관리
 - 백테스팅 폴더만 비우려면

@@ -21,18 +21,78 @@ type ScreenerRow = {
 
 type ConditionId = 1 | 2 | 3 | 4 | 5;
 type ResultsByCondition = Record<ConditionId, ScreenerRow[]>;
+type LogLevel = "DEBUG" | "INFO" | "ERROR";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+function loadEnvFile() {
+  const envPath = path.join(__dirname, ".env");
+  if (!fs.existsSync(envPath)) {
+    return;
+  }
+
+  const lines = fs.readFileSync(envPath, "utf8").split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+
+    const separatorIndex = trimmed.indexOf("=");
+    if (separatorIndex === -1) {
+      continue;
+    }
+
+    const key = trimmed.slice(0, separatorIndex).trim();
+    const value = trimmed.slice(separatorIndex + 1).trim();
+    if (key && !(key in process.env)) {
+      process.env[key] = value;
+    }
+  }
+}
+
+loadEnvFile();
+
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
-  const CACHE_TTL_MS = 15 * 60 * 1000;
+  const FETCH_TIMEOUT_MS = Number(process.env.FETCH_TIMEOUT_MS) || 8000;
+  const CACHE_TTL_MS = (Number(process.env.CACHE_TTL_MINUTES) || 15) * 60 * 1000;
+  const LOG_LEVEL = (process.env.LOG_LEVEL?.toUpperCase() as LogLevel | undefined) || "INFO";
+  const publicDir = path.join(__dirname, "public");
+  const logsDir = path.join(__dirname, "logs");
+  const logFile = path.join(logsDir, `app-${new Date().toISOString().slice(0, 10)}.log`);
   let cachedDailyResults: { generatedAt: number; resultsByCondition: ResultsByCondition } | null = null;
   let cachedFourHourResults: { generatedAt: number; resultsByCondition: ResultsByCondition } | null = null;
   let inflightDailyBuild: Promise<{ generatedAt: number; resultsByCondition: ResultsByCondition }> | null = null;
   let inflightFourHourBuild: Promise<{ generatedAt: number; resultsByCondition: ResultsByCondition }> | null = null;
+
+  if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir);
+  if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir);
+
+  const logPriority: Record<LogLevel, number> = {
+    DEBUG: 10,
+    INFO: 20,
+    ERROR: 30,
+  };
+
+  const logEvent = (level: LogLevel, event: string, details: Record<string, unknown> = {}) => {
+    if (logPriority[level] < logPriority[LOG_LEVEL]) {
+      return;
+    }
+
+    const entry = JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level,
+      event,
+      pid: process.pid,
+      ...details,
+    });
+
+    fs.appendFileSync(logFile, `${entry}\n`);
+    console.log(entry);
+  };
 
   app.use(express.json());
 
@@ -44,7 +104,7 @@ async function startServer() {
 
   const fetchJson = async (url: string) => {
     const response = await fetch(url, {
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     return response.json();
   };
@@ -235,7 +295,12 @@ async function startServer() {
           if (isBullishAlignment(weeklyPrices) && isNearDailyMA20(dailyPrices, currentPrice)) {
             resultsByCondition[3].push(row);
           }
-        } catch {}
+        } catch (error) {
+          logEvent("DEBUG", "daily_symbol_failed", {
+            symbol,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
       }
     });
 
@@ -307,7 +372,12 @@ async function startServer() {
           if (isBullishAlignment(fourHourPrices)) {
             resultsByCondition[5].push(row);
           }
-        } catch {}
+        } catch (error) {
+          logEvent("DEBUG", "four_hour_symbol_failed", {
+            symbol,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
       }
     });
 
@@ -386,8 +456,6 @@ async function startServer() {
       ).join("\n");
       const csvContent = csvHeader + csvRows;
 
-      const publicDir = path.join(__dirname, "public");
-      if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir);
       fs.writeFileSync(path.join(publicDir, "screener_result.csv"), csvContent);
 
       return res.json({
@@ -399,7 +467,10 @@ async function startServer() {
         downloadUrl: "/screener_result.csv",
       });
     } catch (error) {
-      console.error("Error fetching Bithumb data:", error);
+      logEvent("ERROR", "api_crypto_failed", {
+        conditionId,
+        message: error instanceof Error ? error.message : String(error),
+      });
       return res.status(500).json({ success: false, error: "Failed to fetch data" });
     }
   });
@@ -419,8 +490,26 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  const server = app.listen(PORT, "0.0.0.0", () => {
+    logEvent("INFO", "server_started", { port: PORT, command: process.argv.join(" ") });
+  });
+
+  const shutdown = (signal: string) => {
+    logEvent("INFO", "server_stopping", { signal });
+    server.close(() => {
+      logEvent("INFO", "server_stopped", { signal });
+      process.exit(0);
+    });
+  };
+
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("uncaughtException", (error) => {
+    logEvent("ERROR", "uncaught_exception", { message: error.message });
+    shutdown("uncaughtException");
+  });
+  process.on("unhandledRejection", (reason) => {
+    logEvent("ERROR", "unhandled_rejection", { message: String(reason) });
   });
 }
 
