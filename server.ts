@@ -19,7 +19,7 @@ type ScreenerRow = {
   candle_count_m: number;
 };
 
-type ConditionId = 1 | 2 | 3 | 4 | 5;
+type ConditionId = 1 | 2 | 3 | 4 | 5 | 6;
 type ResultsByCondition = Record<ConditionId, ScreenerRow[]>;
 type LogLevel = "DEBUG" | "INFO" | "ERROR";
 
@@ -147,13 +147,13 @@ async function startServer() {
     return currentPrice >= lowerLimit && currentPrice <= upperLimit;
   };
 
-  const isAboveDailyMA30Threshold = (prices: number[], currentPrice: number, lowerPercent: number) => {
-    const ma30 = calculateMA(prices, 30);
-    if (ma30 === null) {
+  const isAboveDailyMAThreshold = (prices: number[], period: number, currentPrice: number, lowerPercent: number) => {
+    const movingAverage = calculateMA(prices, period);
+    if (movingAverage === null) {
       return false;
     }
 
-    const lowerLimit = ma30 * (1 + lowerPercent / 100);
+    const lowerLimit = movingAverage * (1 + lowerPercent / 100);
     return currentPrice >= lowerLimit;
   };
 
@@ -224,6 +224,7 @@ async function startServer() {
       3: [],
       4: [],
       5: [],
+      6: [],
     });
 
   const getScreenableSymbols = (tickerData: any) => {
@@ -344,7 +345,8 @@ async function startServer() {
             continue;
           }
 
-          const meetsDailyConditionFourGuard = isAboveDailyMA30Threshold(dailyPrices, currentPrice, -3);
+          const meetsDailyConditionFourGuard = isAboveDailyMAThreshold(dailyPrices, 20, currentPrice, -3);
+          const meetsDailyConditionSixGuard = isAboveDailyMAThreshold(dailyPrices, 30, currentPrice, -3);
           const hourlyCandleData = await fetchJson(`https://api.bithumb.com/public/candlestick/${symbol}_KRW/1h`);
           if (hourlyCandleData.status !== "0000") {
             continue;
@@ -358,19 +360,27 @@ async function startServer() {
 
           const currentFourHourPrice = fourHourPrices[fourHourPrices.length - 1];
 
+          const ma20FourHour = calculateMA(fourHourPrices, 20);
           const ma30FourHour = calculateMA(fourHourPrices, 30);
           const ma120FourHour = calculateMA(fourHourPrices, 120);
           const row = buildRow(tickerData, symbol, currentPrice, dailyPrices, monthlyPrices);
 
           if (
             meetsDailyConditionFourGuard &&
-            matchesFourHourRange(currentFourHourPrice, ma30FourHour, ma120FourHour)
+            matchesFourHourRange(currentFourHourPrice, ma20FourHour, ma120FourHour)
           ) {
             resultsByCondition[4].push(row);
           }
 
           if (isBullishAlignment(fourHourPrices)) {
             resultsByCondition[5].push(row);
+          }
+
+          if (
+            meetsDailyConditionSixGuard &&
+            matchesFourHourRange(currentFourHourPrice, ma30FourHour, ma120FourHour)
+          ) {
+            resultsByCondition[6].push(row);
           }
         } catch (error) {
           logEvent("DEBUG", "four_hour_symbol_failed", {
@@ -438,7 +448,7 @@ async function startServer() {
   // API Route: Fetch Crypto Data from Bithumb with Multi-Timeframe Analysis
   app.get("/api/crypto", async (req, res) => {
     const requested = req.query.conditionId ? parseInt(req.query.conditionId.toString(), 10) : 1;
-    const conditionId = ([1, 2, 3, 4, 5].includes(requested) ? requested : 1) as ConditionId;
+    const conditionId = ([1, 2, 3, 4, 5, 6].includes(requested) ? requested : 1) as ConditionId;
     const forceRefresh = req.query.refresh === "1";
     const isDailyCondition = conditionId <= 3;
 
