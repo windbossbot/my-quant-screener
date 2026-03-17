@@ -22,6 +22,10 @@ type ScreenerRow = {
 type ConditionId = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 type ResultsByCondition = Record<ConditionId, ScreenerRow[]>;
 type LogLevel = "DEBUG" | "INFO" | "ERROR";
+type MarketMeta = {
+  korean_name: string;
+  english_name: string;
+};
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -227,6 +231,21 @@ async function startServer() {
     return tickerData;
   };
 
+  const getMarketMetadata = async () => {
+    const marketResponse = await fetchJson("https://api.bithumb.com/v1/market/all");
+    const marketMap = new Map<string, MarketMeta>();
+
+    for (const item of marketResponse) {
+      const symbol = String(item.market).replace("KRW-", "");
+      marketMap.set(symbol, {
+        korean_name: item.korean_name,
+        english_name: item.english_name,
+      });
+    }
+
+    return marketMap;
+  };
+
   const createEmptyResults = (): ResultsByCondition => ({
       1: [],
       2: [],
@@ -248,10 +267,17 @@ async function startServer() {
     });
   };
 
-  const buildRow = (tickerData: any, symbol: string, currentPrice: number, dailyPrices: number[], monthlyPrices: number[]): ScreenerRow => ({
+  const buildRow = (
+    tickerData: any,
+    marketMetadata: Map<string, MarketMeta>,
+    symbol: string,
+    currentPrice: number,
+    dailyPrices: number[],
+    monthlyPrices: number[],
+  ): ScreenerRow => ({
     market: `${symbol}/KRW`,
-    korean_name: symbol,
-    english_name: symbol,
+    korean_name: marketMetadata.get(symbol)?.korean_name || symbol,
+    english_name: marketMetadata.get(symbol)?.english_name || symbol,
     price: currentPrice,
     change: parseFloat(tickerData.data[symbol].fluctate_rate_24H) / 100,
     volume: parseFloat(tickerData.data[symbol].acc_trade_value_24H),
@@ -264,7 +290,7 @@ async function startServer() {
   });
 
   const buildDailyConditionResults = async () => {
-    const tickerData = await getTickerData();
+    const [tickerData, marketMetadata] = await Promise.all([getTickerData(), getMarketMetadata()]);
     const resultsByCondition = createEmptyResults();
     const queue = [...getScreenableSymbols(tickerData)];
     const concurrency = 15;
@@ -295,7 +321,7 @@ async function startServer() {
             continue;
           }
 
-          const row = buildRow(tickerData, symbol, currentPrice, dailyPrices, monthlyPrices);
+          const row = buildRow(tickerData, marketMetadata, symbol, currentPrice, dailyPrices, monthlyPrices);
 
           if (isBullishAlignment(dailyPrices)) {
             resultsByCondition[1].push(row);
@@ -324,7 +350,7 @@ async function startServer() {
   };
 
   const buildFourHourConditionResults = async () => {
-    const tickerData = await getTickerData();
+    const [tickerData, marketMetadata] = await Promise.all([getTickerData(), getMarketMetadata()]);
     const resultsByCondition = createEmptyResults();
     const queue = [...getScreenableSymbols(tickerData)];
     const concurrency = 15;
@@ -374,7 +400,7 @@ async function startServer() {
           const ma20FourHour = calculateMA(fourHourPrices, 20);
           const ma30FourHour = calculateMA(fourHourPrices, 30);
           const ma120FourHour = calculateMA(fourHourPrices, 120);
-          const row = buildRow(tickerData, symbol, currentPrice, dailyPrices, monthlyPrices);
+          const row = buildRow(tickerData, marketMetadata, symbol, currentPrice, dailyPrices, monthlyPrices);
 
           if (
             meetsDailyConditionFourGuard &&
