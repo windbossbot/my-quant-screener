@@ -157,6 +157,15 @@ async function startServer() {
     return currentPrice >= lowerLimit;
   };
 
+  const isAboveDailyMA = (prices: number[], period: number, currentPrice: number) => {
+    const movingAverage = calculateMA(prices, period);
+    if (movingAverage === null) {
+      return false;
+    }
+
+    return currentPrice >= movingAverage;
+  };
+
   const isWithinPercentRange = (currentPrice: number, movingAverage: number | null, upperPercent: number, lowerPercent: number) => {
     if (movingAverage === null) {
       return false;
@@ -346,7 +355,7 @@ async function startServer() {
           }
 
           const meetsDailyConditionFourGuard = isAboveDailyMAThreshold(dailyPrices, 20, currentPrice, -3);
-          const meetsDailyConditionSixGuard = isAboveDailyMAThreshold(dailyPrices, 30, currentPrice, -3);
+          const meetsDailyConditionSixGuard = isAboveDailyMA(dailyPrices, 30, currentPrice);
           const hourlyCandleData = await fetchJson(`https://api.bithumb.com/public/candlestick/${symbol}_KRW/1h`);
           if (hourlyCandleData.status !== "0000") {
             continue;
