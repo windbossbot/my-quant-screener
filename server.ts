@@ -26,6 +26,10 @@ type MarketMeta = {
   korean_name: string;
   english_name: string;
 };
+type OrderbookEntry = {
+  price: string;
+  quantity: string;
+};
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -189,6 +193,12 @@ async function startServer() {
       isWithinPercentRange(currentPrice, shortMa, 5, -1) &&
       isWithinPercentRange(currentPrice, longMa, 2, -10)
     );
+  };
+
+  const getTopBidNotional = (bids: OrderbookEntry[], depth: number) => {
+    return bids
+      .slice(0, depth)
+      .reduce((sum, bid) => sum + Number(bid.price) * Number(bid.quantity), 0);
   };
 
   const calculateRSI = (prices: number[], period = 14) => {
@@ -413,11 +423,19 @@ async function startServer() {
             resultsByCondition[5].push(row);
           }
 
-          if (
+          const matchesConditionSixRange =
             meetsDailyConditionSixGuard &&
-            matchesFourHourRange(currentFourHourPrice, ma30FourHour, ma120FourHour)
-          ) {
-            resultsByCondition[6].push(row);
+            matchesFourHourRange(currentFourHourPrice, ma30FourHour, ma120FourHour);
+
+          if (matchesConditionSixRange) {
+            const orderbookData = await fetchJson(`https://api.bithumb.com/public/orderbook/${symbol}_KRW`);
+            const topBidNotional = orderbookData.status === "0000"
+              ? getTopBidNotional(orderbookData.data.bids as OrderbookEntry[], 10)
+              : Number.POSITIVE_INFINITY;
+
+            if (topBidNotional < 100_000_000) {
+              resultsByCondition[6].push(row);
+            }
           }
 
           if (
