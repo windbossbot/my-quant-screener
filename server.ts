@@ -201,6 +201,15 @@ async function startServer() {
       .reduce((sum, bid) => sum + Number(bid.price) * Number(bid.quantity), 0);
   };
 
+  const hasLightTopBidOrderbook = async (symbol: string) => {
+    const orderbookData = await fetchJson(`https://api.bithumb.com/public/orderbook/${symbol}_KRW`);
+    if (orderbookData.status !== "0000") {
+      return false;
+    }
+
+    return getTopBidNotional(orderbookData.data.bids as OrderbookEntry[], 10) < 100_000_000;
+  };
+
   const calculateRSI = (prices: number[], period = 14) => {
     if (!Array.isArray(prices) || prices.length < period + 1) return null;
     const closes = prices;
@@ -411,15 +420,23 @@ async function startServer() {
           const ma30FourHour = calculateMA(fourHourPrices, 30);
           const ma120FourHour = calculateMA(fourHourPrices, 120);
           const row = buildRow(tickerData, marketMetadata, symbol, currentPrice, dailyPrices, monthlyPrices);
+          let topBidOrderbookCheck: boolean | null = null;
+          const passesTopBidOrderbook = async () => {
+            if (topBidOrderbookCheck === null) {
+              topBidOrderbookCheck = await hasLightTopBidOrderbook(symbol);
+            }
+            return topBidOrderbookCheck;
+          };
 
-          if (
+          const matchesConditionFourRange =
             meetsDailyConditionFourGuard &&
-            matchesFourHourRange(currentFourHourPrice, ma20FourHour, ma120FourHour)
-          ) {
+            matchesFourHourRange(currentFourHourPrice, ma20FourHour, ma120FourHour);
+
+          if (matchesConditionFourRange && await passesTopBidOrderbook()) {
             resultsByCondition[4].push(row);
           }
 
-          if (isBullishAlignment(fourHourPrices)) {
+          if (isBullishAlignment(fourHourPrices) && await passesTopBidOrderbook()) {
             resultsByCondition[5].push(row);
           }
 
@@ -427,20 +444,14 @@ async function startServer() {
             meetsDailyConditionSixGuard &&
             matchesFourHourRange(currentFourHourPrice, ma30FourHour, ma120FourHour);
 
-          if (matchesConditionSixRange) {
-            const orderbookData = await fetchJson(`https://api.bithumb.com/public/orderbook/${symbol}_KRW`);
-            const topBidNotional = orderbookData.status === "0000"
-              ? getTopBidNotional(orderbookData.data.bids as OrderbookEntry[], 10)
-              : Number.POSITIVE_INFINITY;
-
-            if (topBidNotional < 100_000_000) {
-              resultsByCondition[6].push(row);
-            }
+          if (matchesConditionSixRange && await passesTopBidOrderbook()) {
+            resultsByCondition[6].push(row);
           }
 
           if (
             meetsDailyConditionSevenGuard &&
-            matchesFourHourRange(currentFourHourPrice, ma30FourHour, ma120FourHour)
+            matchesFourHourRange(currentFourHourPrice, ma30FourHour, ma120FourHour) &&
+            await passesTopBidOrderbook()
           ) {
             resultsByCondition[7].push(row);
           }
