@@ -33,8 +33,8 @@ type OrderbookEntry = {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DAILY_CONDITION_IDS: ConditionId[] = [1, 2, 3, 8];
-const FOUR_HOUR_CONDITION_IDS: ConditionId[] = [4, 5, 6, 7];
+const DAILY_CONDITION_IDS: ConditionId[] = [5, 6, 7, 8];
+const FOUR_HOUR_CONDITION_IDS: ConditionId[] = [1, 2, 3, 4];
 
 function loadEnvFile() {
   const envPath = path.join(__dirname, ".env");
@@ -346,15 +346,15 @@ async function startServer() {
           const row = buildRow(tickerData, marketMetadata, symbol, currentPrice, dailyPrices, monthlyPrices);
 
           if (isBullishAlignment(dailyPrices)) {
-            resultsByCondition[1].push(row);
-          }
-          if (isBullishAlignment(monthlyPrices) && isNearDailyMA20(dailyPrices, currentPrice)) {
-            resultsByCondition[2].push(row);
-          }
-          if (isBullishAlignment(weeklyPrices) && isNearDailyMA20(dailyPrices, currentPrice)) {
-            resultsByCondition[3].push(row);
+            resultsByCondition[5].push(row);
           }
           if (isWithinPercentRange(currentPrice, row.ma120_d, 3, -1)) {
+            resultsByCondition[6].push(row);
+          }
+          if (isBullishAlignment(weeklyPrices) && isNearDailyMA20(dailyPrices, currentPrice)) {
+            resultsByCondition[7].push(row);
+          }
+          if (isBullishAlignment(monthlyPrices) && isNearDailyMA20(dailyPrices, currentPrice)) {
             resultsByCondition[8].push(row);
           }
         } catch (error) {
@@ -439,11 +439,11 @@ async function startServer() {
             matchesFourHourRange(currentFourHourPrice, ma20FourHour, ma120FourHour);
 
           if (matchesConditionFourRange && await passesTopBidOrderbook()) {
-            resultsByCondition[4].push(row);
+            resultsByCondition[1].push(row);
           }
 
           if (isBullishAlignment(fourHourPrices) && await passesTopBidOrderbook()) {
-            resultsByCondition[5].push(row);
+            resultsByCondition[2].push(row);
           }
 
           const matchesConditionSixRange =
@@ -451,7 +451,7 @@ async function startServer() {
             matchesFourHourRange(currentFourHourPrice, ma30FourHour, ma120FourHour);
 
           if (matchesConditionSixRange && await passesTopBidOrderbook()) {
-            resultsByCondition[6].push(row);
+            resultsByCondition[3].push(row);
           }
 
           if (
@@ -459,7 +459,7 @@ async function startServer() {
             matchesFourHourRange(currentFourHourPrice, ma30FourHour, ma120FourHour) &&
             await passesTopBidOrderbook()
           ) {
-            resultsByCondition[7].push(row);
+            resultsByCondition[4].push(row);
           }
         } catch (error) {
           logEvent("DEBUG", "four_hour_symbol_failed", {
