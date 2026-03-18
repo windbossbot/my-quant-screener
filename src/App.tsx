@@ -14,14 +14,17 @@ interface CryptoData {
 type CachedConditionData = { data: CryptoData[]; lastUpdated: string };
 
 const CONDITIONS = [
-  { id: 1, title: "일봉 정배열", description: "일봉 20일선, 60일선, 120일선이 상승 정배열인 종목" },
-  { id: 2, title: "월봉 정배열", description: "월봉이 정배열이고 현재가가 일봉 20일선 위아래 5% 이내인 종목" },
-  { id: 3, title: "주봉 정배열", description: "주봉이 정배열이고 현재가가 일봉 20일선 위아래 5% 이내인 종목" },
-  { id: 4, title: "4시간 20·120선 범위", description: "4시간봉 기준 현재가가 20선 대비 +5%~-1%, 120선 대비 +2%~-10% 범위이고 일봉 20선 대비 -3% 이상이며 상위 매수 10호가 누적금액이 1억 미만인 종목" },
-  { id: 5, title: "4시간봉 정배열", description: "4시간봉 20선, 60선, 120선이 상승 정배열이며 상위 매수 10호가 누적금액이 1억 미만인 종목" },
-  { id: 6, title: "4시간 30·120선 범위", description: "4시간봉 기준 현재가가 30선 대비 +5%~-1%, 120선 대비 +2%~-10% 범위이고 일봉 30선 위에 있으며 상위 매수 10호가 누적금액이 1억 미만인 종목" },
-  { id: 7, title: "4시간 30·120선 + 일봉20", description: "4시간봉 기준 현재가가 30선 대비 +5%~-1%, 120선 대비 +2%~-10% 범위이고 일봉 20선 위에 있으며 상위 매수 10호가 누적금액이 1억 미만인 종목" },
+  { id: 1, timeframe: "일봉", title: "정배열", description: "일봉 20일선, 60일선, 120일선이 상승 정배열인 종목" },
+  { id: 8, timeframe: "일봉", title: "120선 근접", description: "일봉 120일선 대비 -1%~+3% 범위에 있는 종목" },
+  { id: 2, timeframe: "월봉", title: "정배열", description: "월봉이 정배열이고 현재가가 일봉 20일선 위아래 5% 이내인 종목" },
+  { id: 3, timeframe: "주봉", title: "정배열", description: "주봉이 정배열이고 현재가가 일봉 20일선 위아래 5% 이내인 종목" },
+  { id: 4, timeframe: "4시간봉", title: "20·120선 범위", description: "4시간봉 기준 현재가가 20선 대비 +5%~-1%, 120선 대비 +2%~-10% 범위이고 일봉 20선 대비 -3% 이상이며 상위 매수 10호가 누적금액이 1억 미만인 종목" },
+  { id: 5, timeframe: "4시간봉", title: "정배열", description: "4시간봉 20선, 60선, 120선이 상승 정배열이며 상위 매수 10호가 누적금액이 1억 미만인 종목" },
+  { id: 6, timeframe: "4시간봉", title: "30·120선 범위", description: "4시간봉 기준 현재가가 30선 대비 +5%~-1%, 120선 대비 +2%~-10% 범위이고 일봉 30선 위에 있으며 상위 매수 10호가 누적금액이 1억 미만인 종목" },
+  { id: 7, timeframe: "4시간봉", title: "30·120 + 일봉20", description: "4시간봉 기준 현재가가 30선 대비 +5%~-1%, 120선 대비 +2%~-10% 범위이고 일봉 20선 위에 있으며 상위 매수 10호가 누적금액이 1억 미만인 종목" },
 ] as const;
+
+const TIMEFRAME_ORDER = ["일봉", "월봉", "주봉", "4시간봉"] as const;
 
 export default function App() {
   const [data, setData] = useState<CryptoData[]>([]);
@@ -197,6 +200,10 @@ export default function App() {
   const favoriteItems = sortedData.filter((item) => favorites.includes(item.market));
   const otherItems = sortedData.filter((item) => !favorites.includes(item.market));
   const selectedConditionMeta = CONDITIONS.find((condition) => condition.id === selectedCondition);
+  const conditionGroups = TIMEFRAME_ORDER.map((timeframe) => ({
+    timeframe,
+    items: CONDITIONS.filter((condition) => condition.timeframe === timeframe),
+  })).filter((group) => group.items.length > 0);
 
   const SortIcon = ({ column }: { column: keyof CryptoData }) => {
     if (sortConfig.key !== column) return <div className="w-3 h-3 opacity-20 ml-1 inline-block" />;
@@ -260,28 +267,37 @@ export default function App() {
           
           <div className="mt-8 space-y-3">
             <span className="block text-[10px] font-mono uppercase opacity-40">Condition Slot:</span>
-            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-              {CONDITIONS.map((condition) => (
-                <button
-                  key={condition.id}
-                  onClick={() => setSelectedCondition(condition.id)}
-                  className={`rounded-2xl border p-4 text-left transition-all cursor-pointer ${
-                    selectedCondition === condition.id
-                      ? 'bg-[#141414] text-[#E4E3E0] border-[#141414]'
-                      : 'border-[#141414]/20 opacity-70 hover:opacity-100'
-                  }`}
-                >
-                  <div className="mb-2 text-xs font-mono uppercase tracking-widest">
-                    {condition.id.toString().padStart(2, '0')}
+            <div className="space-y-4">
+              {conditionGroups.map((group) => (
+                <div key={group.timeframe}>
+                  <div className="mb-2 text-[11px] font-mono uppercase tracking-widest opacity-40">
+                    {group.timeframe}
                   </div>
-                  <div className="text-base font-semibold tracking-tight">{condition.title}</div>
-                  <div className="mt-1 text-xs leading-relaxed opacity-70">{condition.description}</div>
-                </button>
+                  <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                    {group.items.map((condition) => (
+                      <button
+                        key={condition.id}
+                        onClick={() => setSelectedCondition(condition.id)}
+                        className={`rounded-2xl border p-4 text-left transition-all cursor-pointer ${
+                          selectedCondition === condition.id
+                            ? 'bg-[#141414] text-[#E4E3E0] border-[#141414]'
+                            : 'border-[#141414]/20 opacity-70 hover:opacity-100'
+                        }`}
+                      >
+                        <div className="mb-2 text-xs font-mono uppercase tracking-widest">
+                          {condition.id.toString().padStart(2, '0')}
+                        </div>
+                        <div className="text-base font-semibold tracking-tight">{condition.title}</div>
+                        <div className="mt-1 text-xs leading-relaxed opacity-70">{condition.description}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
             {selectedConditionMeta && (
               <div className="max-w-2xl text-sm leading-relaxed opacity-60">
-                {selectedConditionMeta.description}
+                {selectedConditionMeta.timeframe} / {selectedConditionMeta.description}
               </div>
             )}
           </div>

@@ -19,7 +19,7 @@ type ScreenerRow = {
   candle_count_m: number;
 };
 
-type ConditionId = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+type ConditionId = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 type ResultsByCondition = Record<ConditionId, ScreenerRow[]>;
 type LogLevel = "DEBUG" | "INFO" | "ERROR";
 type MarketMeta = {
@@ -33,6 +33,8 @@ type OrderbookEntry = {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const DAILY_CONDITION_IDS: ConditionId[] = [1, 2, 3, 8];
+const FOUR_HOUR_CONDITION_IDS: ConditionId[] = [4, 5, 6, 7];
 
 function loadEnvFile() {
   const envPath = path.join(__dirname, ".env");
@@ -273,6 +275,7 @@ async function startServer() {
       5: [],
       6: [],
       7: [],
+      8: [],
     });
 
   const getScreenableSymbols = (tickerData: any) => {
@@ -350,6 +353,9 @@ async function startServer() {
           }
           if (isBullishAlignment(weeklyPrices) && isNearDailyMA20(dailyPrices, currentPrice)) {
             resultsByCondition[3].push(row);
+          }
+          if (isWithinPercentRange(currentPrice, row.ma120_d, 3, -1)) {
+            resultsByCondition[8].push(row);
           }
         } catch (error) {
           logEvent("DEBUG", "daily_symbol_failed", {
@@ -521,9 +527,9 @@ async function startServer() {
   // API Route: Fetch Crypto Data from Bithumb with Multi-Timeframe Analysis
   app.get("/api/crypto", async (req, res) => {
     const requested = req.query.conditionId ? parseInt(req.query.conditionId.toString(), 10) : 1;
-    const conditionId = ([1, 2, 3, 4, 5, 6, 7].includes(requested) ? requested : 1) as ConditionId;
+    const conditionId = ([1, 2, 3, 4, 5, 6, 7, 8].includes(requested) ? requested : 1) as ConditionId;
     const forceRefresh = req.query.refresh === "1";
-    const isDailyCondition = conditionId <= 3;
+    const isDailyCondition = DAILY_CONDITION_IDS.includes(conditionId);
 
     res.setHeader("Content-Type", "application/json");
 
@@ -532,6 +538,10 @@ async function startServer() {
         ? await getDailyResults(forceRefresh)
         : await getFourHourResults(forceRefresh);
       const results = resultsByCondition[conditionId];
+      const relevantConditionIds = isDailyCondition ? DAILY_CONDITION_IDS : FOUR_HOUR_CONDITION_IDS;
+      const relevantData = Object.fromEntries(
+        relevantConditionIds.map((id) => [id, resultsByCondition[id]]),
+      );
 
       const csvHeader = "Market,Price,MA20(D),MA60(D),MA120(D),MA240(D),MA120(M),MonthlyCandles\n";
       const csvRows = results.map((r) =>
@@ -545,7 +555,7 @@ async function startServer() {
         success: true,
         count: results.length,
         data: results,
-        allData: resultsByCondition,
+        allData: relevantData,
         generatedAt,
         downloadUrl: "/screener_result.csv",
       });
