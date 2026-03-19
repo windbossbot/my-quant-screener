@@ -19,7 +19,7 @@ type ScreenerRow = {
   candle_count_m: number;
 };
 
-type ConditionId = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+type ConditionId = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 type ResultsByCondition = Record<ConditionId, ScreenerRow[]>;
 type LogLevel = "DEBUG" | "INFO" | "ERROR";
 type MarketMeta = {
@@ -33,7 +33,7 @@ type OrderbookEntry = {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DAILY_CONDITION_IDS: ConditionId[] = [5, 6, 7, 8];
+const DAILY_CONDITION_IDS: ConditionId[] = [5, 6, 7, 8, 9];
 const FOUR_HOUR_CONDITION_IDS: ConditionId[] = [1, 2, 3, 4];
 
 function loadEnvFile() {
@@ -276,6 +276,7 @@ async function startServer() {
       6: [],
       7: [],
       8: [],
+      9: [],
     });
 
   const getScreenableSymbols = (tickerData: any) => {
@@ -348,14 +349,17 @@ async function startServer() {
           if (isBullishAlignment(dailyPrices)) {
             resultsByCondition[5].push(row);
           }
-          if (isWithinPercentRange(currentPrice, row.ma120_d, 7, -1)) {
+          if (isBullishAlignment(dailyPrices) && isWithinPercentRange(currentPrice, calculateMA(dailyPrices, 30), 6, -1)) {
             resultsByCondition[6].push(row);
           }
-          if (isBullishAlignment(weeklyPrices) && isNearDailyMA20(dailyPrices, currentPrice)) {
+          if (isWithinPercentRange(currentPrice, row.ma120_d, 7, -1)) {
             resultsByCondition[7].push(row);
           }
-          if (isBullishAlignment(monthlyPrices) && isNearDailyMA20(dailyPrices, currentPrice)) {
+          if (isBullishAlignment(weeklyPrices) && isNearDailyMA20(dailyPrices, currentPrice)) {
             resultsByCondition[8].push(row);
+          }
+          if (isBullishAlignment(monthlyPrices) && isNearDailyMA20(dailyPrices, currentPrice)) {
+            resultsByCondition[9].push(row);
           }
         } catch (error) {
           logEvent("DEBUG", "daily_symbol_failed", {
@@ -527,7 +531,7 @@ async function startServer() {
   // API Route: Fetch Crypto Data from Bithumb with Multi-Timeframe Analysis
   app.get("/api/crypto", async (req, res) => {
     const requested = req.query.conditionId ? parseInt(req.query.conditionId.toString(), 10) : 1;
-    const conditionId = ([1, 2, 3, 4, 5, 6, 7, 8].includes(requested) ? requested : 1) as ConditionId;
+    const conditionId = ([1, 2, 3, 4, 5, 6, 7, 8, 9].includes(requested) ? requested : 1) as ConditionId;
     const forceRefresh = req.query.refresh === "1";
     const isDailyCondition = DAILY_CONDITION_IDS.includes(conditionId);
 
