@@ -348,7 +348,7 @@ async function startServer() {
           if (isBullishAlignment(dailyPrices)) {
             resultsByCondition[5].push(row);
           }
-          if (isWithinPercentRange(currentPrice, row.ma120_d, 3, -1)) {
+          if (isWithinPercentRange(currentPrice, row.ma120_d, 5, -1)) {
             resultsByCondition[6].push(row);
           }
           if (isBullishAlignment(weeklyPrices) && isNearDailyMA20(dailyPrices, currentPrice)) {

@@ -19,7 +19,7 @@ const CONDITIONS = [
   { id: 3, timeframe: "4시간봉", title: "30·120선 범위", description: "4시간봉 기준 현재가가 30선 대비 +5%~-1%, 120선 대비 +2%~-10% 범위이고 일봉 30선 위에 있으며 상위 매수 10호가 누적금액이 1억 미만인 종목" },
   { id: 4, timeframe: "4시간봉", title: "30·120 + 일봉20", description: "4시간봉 기준 현재가가 30선 대비 +5%~-1%, 120선 대비 +2%~-10% 범위이고 일봉 20선 위에 있으며 상위 매수 10호가 누적금액이 1억 미만인 종목" },
   { id: 5, timeframe: "일봉", title: "정배열", description: "일봉 20일선, 60일선, 120일선이 상승 정배열인 종목" },
-  { id: 6, timeframe: "일봉", title: "120선 근접", description: "일봉 120일선 대비 -1%~+3% 범위에 있는 종목" },
+  { id: 6, timeframe: "일봉", title: "120선 근접", description: "일봉 120일선 대비 -1%~+5% 범위에 있는 종목" },
   { id: 7, timeframe: "주봉", title: "정배열", description: "주봉이 정배열이고 현재가가 일봉 20일선 위아래 5% 이내인 종목" },
   { id: 8, timeframe: "월봉", title: "정배열", description: "월봉이 정배열이고 현재가가 일봉 20일선 위아래 5% 이내인 종목" },
 ] as const;
