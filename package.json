@@ -6,12 +6,17 @@
   "scripts": {
     "preflight": "node scripts/preflight.mjs",
     "dev": "npm run preflight && tsx server.ts",
-    "start": "npm run preflight && node server.ts",
-    "build": "vite build",
+    "build:client": "vite build",
+    "build:server": "tsc -p tsconfig.server.json",
+    "start": "npm run preflight && node build-server/server.js",
+    "build": "npm run build:client && npm run build:server",
     "clean": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"if (Test-Path dist) { Remove-Item dist -Recurse -Force }; if (Test-Path public\\screener_result.csv) { Remove-Item public\\screener_result.csv -Force }; Get-ChildItem -Path . -Filter *.log -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue\"",
     "lint": "tsc --noEmit",
     "setup:local": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"New-Item -ItemType Directory -Force .local,.local\\archive,.local\\backtesting | Out-Null\"",
     "clean:backtesting": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"if (Test-Path .local\\backtesting) { Get-ChildItem .local\\backtesting -Exclude README.md -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue }\""
+  },
+  "engines": {
+    "node": ">=20"
   },
   "dependencies": {
     "express": "^4.21.2",

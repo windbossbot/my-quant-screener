@@ -1,8 +1,6 @@
 import express from "express";
-import { createServer as createViteServer } from "vite";
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
 
 type ScreenerRow = {
   market: string;
@@ -31,13 +29,12 @@ type OrderbookEntry = {
   quantity: string;
 };
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const projectRoot = process.cwd();
 const DAILY_CONDITION_IDS: ConditionId[] = [5, 6, 7, 8, 9];
 const FOUR_HOUR_CONDITION_IDS: ConditionId[] = [1, 2, 3, 4];
 
 function loadEnvFile() {
-  const envPath = path.join(__dirname, ".env");
+  const envPath = path.join(projectRoot, ".env");
   if (!fs.existsSync(envPath)) {
     return;
   }
@@ -70,8 +67,10 @@ async function startServer() {
   const FETCH_TIMEOUT_MS = Number(process.env.FETCH_TIMEOUT_MS) || 8000;
   const CACHE_TTL_MS = (Number(process.env.CACHE_TTL_MINUTES) || 15) * 60 * 1000;
   const LOG_LEVEL = (process.env.LOG_LEVEL?.toUpperCase() as LogLevel | undefined) || "INFO";
-  const publicDir = path.join(__dirname, "public");
-  const logsDir = path.join(__dirname, "logs");
+  const publicDir = path.join(projectRoot, "public");
+  const logsDir = path.join(projectRoot, "logs");
+  const distDir = path.join(projectRoot, "dist");
+  const isProduction = process.env.NODE_ENV === "production";
   const logFile = path.join(logsDir, `app-${new Date().toISOString().slice(0, 10)}.log`);
   let cachedDailyResults: { generatedAt: number; resultsByCondition: ResultsByCondition } | null = null;
   let cachedFourHourResults: { generatedAt: number; resultsByCondition: ResultsByCondition } | null = null;
@@ -105,6 +104,14 @@ async function startServer() {
   };
 
   app.use(express.json());
+  app.get("/healthz", (_req, res) => {
+    res.json({
+      ok: true,
+      pid: process.pid,
+      nodeEnv: process.env.NODE_ENV || "undefined",
+      uptimeSeconds: Number(process.uptime().toFixed(1)),
+    });
+  });
 
   const calculateMA = (prices: number[], period: number) => {
     if (prices.length < period) return null;
@@ -572,23 +579,30 @@ async function startServer() {
     }
   });
 
-  app.use(express.static(path.join(__dirname, "public")));
+  app.use(express.static(publicDir));
 
-  if (process.env.NODE_ENV !== "production") {
+  if (!isProduction) {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(path.join(__dirname, "dist")));
+    app.use(express.static(distDir));
     app.get("*", (req, res) => {
-      res.sendFile(path.join(__dirname, "dist", "index.html"));
+      res.sendFile(path.join(distDir, "index.html"));
     });
   }
 
   const server = app.listen(PORT, "0.0.0.0", () => {
-    logEvent("INFO", "server_started", { port: PORT, command: process.argv.join(" ") });
+    logEvent("INFO", "server_started", {
+      port: PORT,
+      command: process.argv.join(" "),
+      nodeEnv: process.env.NODE_ENV || "undefined",
+      cwd: process.cwd(),
+      distExists: fs.existsSync(distDir),
+    });
   });
 
   const shutdown = (signal: string) => {

@@ -28,6 +28,8 @@
    ```
 6. 브라우저에서 `http://localhost:3000` 접속
 
+배포 시에는 `npm run build` 후 `npm start`를 사용합니다. 서버 헬스체크 경로는 `/healthz` 입니다.
+
 ## 조건
 
 1. `4시간 20·120선 눌림`
@@ -70,6 +72,7 @@
   ```bash
   npm run clean
   ```
+- 서버 빌드 산출물 `build-server/` 는 커밋 대상이 아님
 - 구조화 로그 파일은 `logs/app-YYYY-MM-DD.log`
 - 화면 즐겨찾기는 브라우저 세션 동안만 유지
 - 로컬 메모, 실험안, 백테스팅 파일은 `.local/` 아래에서만 관리
