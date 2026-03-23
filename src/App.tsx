@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useState } from "react";
-import { Coins, Download, RefreshCw, Search, Sparkles, TrendingDown, TrendingUp } from "lucide-react";
+import { Coins, Download, RefreshCw, Search, TrendingDown, TrendingUp } from "lucide-react";
 import { AnimatePresence } from "motion/react";
 import { CONDITIONS } from "./conditions";
 import { ConditionCard } from "./components/ConditionCard";
@@ -15,23 +15,6 @@ import {
   writeFavorites,
 } from "./lib/screenerClient";
 import type { LoadingState, SortConfig, SortDirection, CryptoData } from "./types";
-
-function StatPanel({
-  label,
-  value,
-  accent,
-}: {
-  label: string;
-  value: string;
-  accent: string;
-}) {
-  return (
-    <div className="rounded-[24px] border border-[#141414]/10 bg-[#FBF8F2] p-4 shadow-[0_12px_40px_rgba(20,20,20,0.05)]">
-      <div className={`mb-2 text-[10px] font-semibold uppercase tracking-[0.24em] ${accent}`}>{label}</div>
-      <div className="text-2xl font-semibold tracking-[-0.04em] text-[#141414]">{value}</div>
-    </div>
-  );
-}
 
 function SortButton({
   label,
@@ -138,7 +121,6 @@ export default function App() {
   const sortedData = filterAndSortData(data, deferredSearchTerm, sortConfig);
   const favoriteItems = sortedData.filter((item) => favorites.includes(item.market));
   const otherItems = sortedData.filter((item) => !favorites.includes(item.market));
-  const positiveCount = sortedData.filter((item) => item.change > 0).length;
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(214,141,69,0.22),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(41,90,82,0.16),_transparent_24%),linear-gradient(180deg,_#F5EBDD_0%,_#EFE5D7_48%,_#E9DFD2_100%)] px-4 py-6 text-[#141414] md:px-8 md:py-8">
@@ -148,8 +130,8 @@ export default function App() {
           <div className="absolute -left-16 top-8 h-32 w-32 rounded-full bg-[#C65A2E]/20 blur-3xl" />
           <div className="absolute right-12 top-12 h-40 w-40 rounded-full bg-[#295A52]/20 blur-3xl" />
 
-          <div className="relative z-10 grid gap-8 lg:grid-cols-[1.5fr_1fr]">
-            <div>
+          <div className="relative z-10 flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
+            <div className="max-w-3xl">
               <div className="mb-4 flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/10">
                   <Coins className="h-5 w-5" />
@@ -159,23 +141,18 @@ export default function App() {
                 </span>
               </div>
 
-              <div className="max-w-3xl">
-                <h1 className="text-4xl font-semibold leading-none tracking-[-0.06em] md:text-6xl">
-                  Fast screening,
-                  <br />
-                  sharper entries.
-                </h1>
-                <p className="mt-5 max-w-2xl text-sm leading-7 text-white/72 md:text-base">
-                  조건을 바꾸면 같은 그룹의 결과를 세션 캐시에서 최대한 재사용하고, 새 계산이 필요할 때만 다시 조회합니다.
-                  지금 화면은 단기 대응에 맞게 조건, 결과 수, 즐겨찾기를 한 번에 읽도록 다듬었습니다.
-                </p>
-              </div>
+              <h1 className="text-4xl font-semibold leading-none tracking-[-0.06em] md:text-6xl">
+                Quant Screener
+              </h1>
             </div>
 
-            <div className="relative z-10 grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
-              <StatPanel label="선택 조건" value={selectedConditionMeta.id.toString().padStart(2, "0")} accent="text-[#D68D45]" />
-              <StatPanel label="현재 결과" value={`${sortedData.length}`} accent="text-[#8EB6A8]" />
-              <StatPanel label="즐겨찾기" value={`${favorites.length}`} accent="text-[#D8B3A1]" />
+            <div className="rounded-full border border-white/12 bg-white/8 px-4 py-2 text-right">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/52">
+                Last Sync
+              </div>
+              <div className="mt-1 text-sm font-semibold tracking-[0.01em] text-white/88">
+                {lastUpdated || "Never"}
+              </div>
             </div>
           </div>
         </header>
@@ -185,10 +162,7 @@ export default function App() {
             <div className="rounded-[32px] border border-[#141414]/10 bg-[#FBF8F2]/88 p-5 shadow-[0_18px_60px_rgba(20,20,20,0.06)] backdrop-blur">
               <div className="mb-4 flex items-center justify-between gap-4">
                 <div>
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.26em] text-[#141414]/44">
-                    Condition Stack
-                  </div>
-                  <div className="mt-2 text-2xl font-semibold tracking-[-0.04em]">
+                  <div className="text-2xl font-semibold tracking-[-0.04em]">
                     {selectedConditionMeta.title}
                   </div>
                 </div>
@@ -201,22 +175,12 @@ export default function App() {
                 {selectedConditionMeta.description}
               </div>
 
-              <div className="mt-5 grid gap-2 sm:grid-cols-2">
-                <div className="rounded-[22px] border border-[#141414]/8 bg-white/70 p-4">
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#141414]/44">
-                    Last Sync
-                  </div>
-                  <div className="mt-2 text-lg font-semibold tracking-[-0.03em]">
-                    {lastUpdated || "Never"}
-                  </div>
+              <div className="mt-5 rounded-[22px] border border-[#141414]/8 bg-white/70 px-4 py-3">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#141414]/44">
+                  Last Sync
                 </div>
-                <div className="rounded-[22px] border border-[#141414]/8 bg-white/70 p-4">
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#141414]/44">
-                    Positive 24h
-                  </div>
-                  <div className="mt-2 text-lg font-semibold tracking-[-0.03em]">
-                    {positiveCount}
-                  </div>
+                <div className="mt-1 text-lg font-semibold tracking-[-0.03em]">
+                  {lastUpdated || "Never"}
                 </div>
               </div>
             </div>
@@ -252,10 +216,6 @@ export default function App() {
             <div className="rounded-[32px] border border-[#141414]/10 bg-[#FBF8F2]/88 p-5 shadow-[0_18px_60px_rgba(20,20,20,0.06)] backdrop-blur">
               <div className="flex flex-col gap-4 border-b border-[#141414]/8 pb-5 md:flex-row md:items-end md:justify-between">
                 <div className="flex flex-1 flex-col gap-4">
-                  <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-[#141414]/44">
-                    <Sparkles className="h-3.5 w-3.5" />
-                    Live Selection Desk
-                  </div>
                   <div className="relative max-w-xl">
                     <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#141414]/35" />
                     <input
@@ -309,12 +269,6 @@ export default function App() {
                 </div>
               )}
 
-              <div className="mt-5 grid gap-4 md:grid-cols-4">
-                <StatPanel label="Results" value={`${sortedData.length}`} accent="text-[#C65A2E]" />
-                <StatPanel label="Favorites" value={`${favorites.length}`} accent="text-[#295A52]" />
-                <StatPanel label="Advancers" value={`${positiveCount}`} accent="text-[#4F4A8A]" />
-                <StatPanel label="Status" value={isLoading ? "Syncing" : "Ready"} accent="text-[#7D5A2F]" />
-              </div>
             </div>
 
             {isLoading && data.length === 0 ? (
