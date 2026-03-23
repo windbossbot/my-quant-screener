@@ -1,323 +1,66 @@
-import { useEffect, useState, type FC } from "react";
-import { Coins, Download, LoaderCircle, RefreshCw, Search, Star, TrendingDown, TrendingUp } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
-import { CONDITIONS, type ConditionMeta } from "./conditions";
+import { useDeferredValue, useEffect, useState } from "react";
+import { Coins, Download, RefreshCw, Search, Sparkles, TrendingDown, TrendingUp } from "lucide-react";
+import { AnimatePresence } from "motion/react";
+import { CONDITIONS } from "./conditions";
+import { ConditionCard } from "./components/ConditionCard";
+import { LoadingBanner } from "./components/LoadingBanner";
+import { LoadingSkeleton } from "./components/LoadingSkeleton";
+import { ResultRow } from "./components/ResultRow";
+import {
+  clearConditionCache,
+  filterAndSortData,
+  readCachedConditionData,
+  readFavorites,
+  requestConditionData,
+  writeFavorites,
+} from "./lib/screenerClient";
+import type { LoadingState, SortConfig, SortDirection, CryptoData } from "./types";
 
-interface CryptoData {
-  market: string;
-  korean_name: string;
-  english_name: string;
-  price: number;
-  change: number;
-  volume: number;
-}
-
-type CachedConditionData = {
-  data: CryptoData[];
-  lastUpdated: string;
-};
-
-type SortDirection = "asc" | "desc";
-type SortConfig = {
-  key: keyof CryptoData | null;
-  direction: SortDirection;
-};
-type LoadingState = "idle" | "loading" | "refreshing";
-
-const FAVORITES_KEY = "quant-screener-favorites";
-const SKELETON_ROWS = 6;
-const inflightRequests = new Map<number, Promise<CachedConditionData | null>>();
-
-const getCacheKey = (conditionId: number) => `quant-screener-condition-${conditionId}`;
-
-function readSessionValue<T>(key: string) {
-  const rawValue = sessionStorage.getItem(key);
-  if (!rawValue) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(rawValue) as T;
-  } catch {
-    sessionStorage.removeItem(key);
-    return null;
-  }
-}
-
-function writeSessionValue<T>(key: string, value: T) {
-  sessionStorage.setItem(key, JSON.stringify(value));
-}
-
-function readCachedConditionData(conditionId: number) {
-  return readSessionValue<CachedConditionData>(getCacheKey(conditionId));
-}
-
-function writeCachedConditionData(conditionId: number, data: CryptoData[], lastUpdated: string) {
-  writeSessionValue(getCacheKey(conditionId), { data, lastUpdated });
-}
-
-function readFavorites() {
-  const favorites = readSessionValue<string[]>(FAVORITES_KEY);
-  return Array.isArray(favorites) ? favorites : [];
-}
-
-function writeFavorites(favorites: string[]) {
-  writeSessionValue(FAVORITES_KEY, favorites);
-}
-
-async function requestConditionData(conditionId: number, forceRefresh = false) {
-  if (!forceRefresh) {
-    const cachedData = readCachedConditionData(conditionId);
-    if (cachedData) {
-      return cachedData;
-    }
-
-    const inflightRequest = inflightRequests.get(conditionId);
-    if (inflightRequest) {
-      return inflightRequest;
-    }
-  }
-
-  const requestPromise = (async () => {
-    try {
-      const refreshQuery = forceRefresh ? "&refresh=1" : "";
-      const response = await fetch(`/api/crypto?conditionId=${conditionId}${refreshQuery}`);
-      if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`);
-      }
-
-      const result = await response.json();
-      if (!result.success) {
-        throw new Error("API returned an unsuccessful response");
-      }
-
-      const updatedAt = new Date(result.generatedAt ?? Date.now()).toLocaleTimeString();
-      const allData = result.allData as Record<string, CryptoData[]> | undefined;
-
-      if (allData) {
-        Object.entries(allData).forEach(([key, value]) => {
-          writeCachedConditionData(Number(key), value, updatedAt);
-        });
-      } else {
-        writeCachedConditionData(conditionId, result.data as CryptoData[], updatedAt);
-      }
-
-      return readCachedConditionData(conditionId) ?? {
-        data: result.data as CryptoData[],
-        lastUpdated: updatedAt,
-      };
-    } catch (error) {
-      console.error("Failed to fetch condition data:", error);
-      return null;
-    } finally {
-      if (!forceRefresh) {
-        inflightRequests.delete(conditionId);
-      }
-    }
-  })();
-
-  if (!forceRefresh) {
-    inflightRequests.set(conditionId, requestPromise);
-  }
-
-  return requestPromise;
-}
-
-function filterAndSortData(data: CryptoData[], searchTerm: string, sortConfig: SortConfig) {
-  const normalizedSearch = searchTerm.trim().toLowerCase();
-
-  const filteredData = data.filter((item) => {
-    if (!normalizedSearch) {
-      return true;
-    }
-
-    return (
-      item.korean_name.toLowerCase().includes(normalizedSearch) ||
-      item.english_name.toLowerCase().includes(normalizedSearch) ||
-      item.market.toLowerCase().includes(normalizedSearch)
-    );
-  });
-
-  if (!sortConfig.key) {
-    return filteredData;
-  }
-
-  return [...filteredData].sort((leftItem, rightItem) => {
-    const leftValue = leftItem[sortConfig.key];
-    const rightValue = rightItem[sortConfig.key];
-
-    if (leftValue < rightValue) {
-      return sortConfig.direction === "asc" ? -1 : 1;
-    }
-
-    if (leftValue > rightValue) {
-      return sortConfig.direction === "asc" ? 1 : -1;
-    }
-
-    return 0;
-  });
-}
-
-function formatVolume(volume: number) {
-  return `₩${(volume / 100000000).toFixed(1)}B`;
-}
-
-const SortIcon: FC<{ column: keyof CryptoData; sortConfig: SortConfig }> = ({ column, sortConfig }) => {
-  if (sortConfig.key !== column) {
-    return <div className="inline-block h-3 w-3 opacity-20" />;
-  }
-
-  return sortConfig.direction === "asc"
-    ? <TrendingUp className="inline-block h-3 w-3" />
-    : <TrendingDown className="inline-block h-3 w-3" />;
-};
-
-const ConditionCard: FC<{
-  condition: ConditionMeta;
-  isActive: boolean;
-  onSelect: (conditionId: number) => void;
-}> = ({
-  condition,
-  isActive,
-  onSelect,
-}) => {
+function StatPanel({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string;
+  accent: string;
+}) {
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(condition.id)}
-      className={`rounded-2xl border p-4 text-left transition-all cursor-pointer ${
-        isActive
-          ? "border-[#141414] bg-[#141414] text-[#E4E3E0]"
-          : "border-[#141414]/20 opacity-70 hover:opacity-100"
-      }`}
-    >
-      <div className="mb-2 text-xs font-mono uppercase tracking-widest">
-        {condition.id.toString().padStart(2, "0")}
-      </div>
-      <div className="text-base font-semibold tracking-tight">{condition.title}</div>
-      <div className="mt-1 text-xs leading-relaxed opacity-70">{condition.description}</div>
-    </button>
-  );
-};
-
-const LoadingBanner: FC<{
-  loadingState: LoadingState;
-  selectedCondition: ConditionMeta;
-  hasData: boolean;
-}> = ({
-  loadingState,
-  selectedCondition,
-  hasData,
-}) => {
-  if (loadingState === "idle") {
-    return null;
-  }
-
-  const isRefreshing = loadingState === "refreshing";
-  const title = isRefreshing
-    ? `${selectedCondition.title} 다시 계산 중`
-    : `${selectedCondition.title} 불러오는 중`;
-  const description = hasData
-    ? "기존 목록은 유지한 채 최신 후보를 다시 계산하고 있습니다."
-    : "빗썸 공개 데이터를 조회해서 조건에 맞는 후보를 만들고 있습니다.";
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: -8 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
-      className="mb-6 rounded-2xl border border-[#141414]/15 bg-[#141414] px-4 py-4 text-[#E4E3E0]"
-    >
-      <div className="flex items-start gap-3">
-        <LoaderCircle className="mt-0.5 h-5 w-5 animate-spin" />
-        <div>
-          <div className="text-sm font-semibold uppercase tracking-wide">{title}</div>
-          <div className="mt-1 text-sm leading-relaxed opacity-75">{description}</div>
-        </div>
-      </div>
-    </motion.div>
-  );
-};
-
-function LoadingSkeleton() {
-  return (
-    <div className="border-t border-[#141414]">
-      {Array.from({ length: SKELETON_ROWS }, (_, index) => (
-        <div
-          key={`skeleton-${index}`}
-          className="grid grid-cols-12 gap-4 border-b border-[#141414]/10 p-4 animate-pulse"
-        >
-          <div className="col-span-1 h-5 rounded bg-[#141414]/10" />
-          <div className="col-span-4 space-y-2">
-            <div className="h-5 w-24 rounded bg-[#141414]/10" />
-            <div className="h-4 w-16 rounded bg-[#141414]/10" />
-          </div>
-          <div className="col-span-2 h-5 rounded bg-[#141414]/10" />
-          <div className="col-span-2 h-5 rounded bg-[#141414]/10" />
-          <div className="col-span-3 h-5 rounded bg-[#141414]/10" />
-        </div>
-      ))}
+    <div className="rounded-[24px] border border-[#141414]/10 bg-[#FBF8F2] p-4 shadow-[0_12px_40px_rgba(20,20,20,0.05)]">
+      <div className={`mb-2 text-[10px] font-semibold uppercase tracking-[0.24em] ${accent}`}>{label}</div>
+      <div className="text-2xl font-semibold tracking-[-0.04em] text-[#141414]">{value}</div>
     </div>
   );
 }
 
-const ResultRow: FC<{
-  item: CryptoData;
-  index: number;
-  highlighted: boolean;
-  isFavorite: boolean;
-  onToggleFavorite: (market: string) => void;
-}> = ({
-  item,
-  index,
-  highlighted,
-  isFavorite,
-  onToggleFavorite,
-}) => {
-  const ticker = item.market.split("/")[0];
+function SortButton({
+  label,
+  column,
+  sortConfig,
+  onSort,
+}: {
+  label: string;
+  column: keyof CryptoData;
+  sortConfig: SortConfig;
+  onSort: (key: keyof CryptoData) => void;
+}) {
+  const isActive = sortConfig.key === column;
 
   return (
-    <motion.div
-      key={item.market}
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.98 }}
-      transition={{ delay: index * 0.01 }}
-      className={`grid grid-cols-12 gap-4 border-b border-[#141414]/10 p-4 transition-colors ${
-        highlighted ? "bg-[#141414]/5" : ""
-      }`}
+    <button
+      type="button"
+      onClick={() => onSort(column)}
+      className="col-header col-span-2 cursor-pointer text-right transition-opacity hover:opacity-100"
     >
-      <div className="data-value col-span-1 flex items-center gap-2 opacity-50">
-        <button
-          type="button"
-          onClick={() => onToggleFavorite(item.market)}
-          className="cursor-pointer opacity-70 transition-opacity hover:opacity-100"
-          aria-label={isFavorite ? "Remove favorite" : "Add favorite"}
-        >
-          <Star className={`h-4 w-4 ${isFavorite ? "fill-[#141414] text-[#141414]" : "text-[#141414]/40"}`} />
-        </button>
-        <span>{(index + 1).toString().padStart(2, "0")}</span>
-      </div>
-      <div className="col-span-4 flex flex-col">
-        <span className="text-lg font-semibold leading-tight tracking-normal">{ticker}</span>
-        <span className="mt-1 text-xs font-medium leading-tight opacity-65">{item.korean_name}</span>
-      </div>
-      <div className="data-value col-span-2 text-right font-medium">
-        {item.price.toLocaleString()}
-      </div>
-      <div className={`col-span-2 flex items-center justify-end gap-1 text-right font-mono text-xs ${
-        item.change > 0 ? "text-emerald-600" : "text-rose-600"
-      }`}
-      >
-        {item.change > 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-        {(item.change * 100).toFixed(2)}%
-      </div>
-      <div className="data-value col-span-3 text-right opacity-70">
-        {formatVolume(item.volume)}
-      </div>
-    </motion.div>
+      {label}{" "}
+      {isActive ? (
+        sortConfig.direction === "asc" ? <TrendingUp className="inline-block h-3 w-3" /> : <TrendingDown className="inline-block h-3 w-3" />
+      ) : (
+        <span className="inline-block h-3 w-3 opacity-20" />
+      )}
+    </button>
   );
-};
+}
 
 export default function App() {
   const [data, setData] = useState<CryptoData[]>([]);
@@ -332,6 +75,7 @@ export default function App() {
     direction: "desc",
   });
 
+  const deferredSearchTerm = useDeferredValue(searchTerm);
   const selectedConditionMeta = CONDITIONS.find((condition) => condition.id === selectedCondition) ?? CONDITIONS[0];
   const isLoading = loadingState !== "idle";
 
@@ -372,9 +116,7 @@ export default function App() {
   }, []);
 
   const handleReload = () => {
-    CONDITIONS.forEach((condition) => {
-      sessionStorage.removeItem(getCacheKey(condition.id));
-    });
+    clearConditionCache(CONDITIONS.map((condition) => condition.id));
     void fetchData(true);
   };
 
@@ -393,27 +135,93 @@ export default function App() {
     writeFavorites(nextFavorites);
   };
 
-  const sortedData = filterAndSortData(data, searchTerm, sortConfig);
+  const sortedData = filterAndSortData(data, deferredSearchTerm, sortConfig);
   const favoriteItems = sortedData.filter((item) => favorites.includes(item.market));
   const otherItems = sortedData.filter((item) => !favorites.includes(item.market));
+  const positiveCount = sortedData.filter((item) => item.change > 0).length;
 
   return (
-    <div className="min-h-screen bg-[#E4E3E0] p-4 font-sans text-[#141414] md:p-8">
-      <header className="mx-auto mb-12 flex max-w-7xl flex-col justify-between gap-6 md:flex-row md:items-end">
-        <div>
-          <div className="mb-2 flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded bg-[#141414]">
-              <Coins className="h-5 w-5 text-[#E4E3E0]" />
-            </div>
-            <span className="text-[11px] font-mono uppercase tracking-widest opacity-50">QuantScreener / v1.0</span>
-          </div>
-          <h1 className="text-5xl leading-none tracking-tighter md:text-7xl">
-            Quant <span className="font-bold">Screener</span>
-          </h1>
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(214,141,69,0.22),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(41,90,82,0.16),_transparent_24%),linear-gradient(180deg,_#F5EBDD_0%,_#EFE5D7_48%,_#E9DFD2_100%)] px-4 py-6 text-[#141414] md:px-8 md:py-8">
+      <div className="mx-auto max-w-7xl">
+        <header className="relative overflow-hidden rounded-[36px] border border-[#141414]/10 bg-[#141414] px-6 py-7 text-[#F8F2E8] shadow-[0_30px_120px_rgba(20,20,20,0.22)] md:px-8 md:py-8">
+          <div className="absolute inset-y-0 right-0 w-1/2 bg-[radial-gradient(circle_at_center,_rgba(214,141,69,0.35),_transparent_45%)] opacity-90" />
+          <div className="absolute -left-16 top-8 h-32 w-32 rounded-full bg-[#C65A2E]/20 blur-3xl" />
+          <div className="absolute right-12 top-12 h-40 w-40 rounded-full bg-[#295A52]/20 blur-3xl" />
 
-          <div className="mt-8 space-y-3">
-            <span className="block text-[10px] font-mono uppercase opacity-40">Condition Slot:</span>
-            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          <div className="relative z-10 grid gap-8 lg:grid-cols-[1.5fr_1fr]">
+            <div>
+              <div className="mb-4 flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/10">
+                  <Coins className="h-5 w-5" />
+                </div>
+                <span className="text-[11px] font-semibold uppercase tracking-[0.26em] text-white/60">
+                  Bithumb Quant Screener
+                </span>
+              </div>
+
+              <div className="max-w-3xl">
+                <h1 className="text-4xl font-semibold leading-none tracking-[-0.06em] md:text-6xl">
+                  Fast screening,
+                  <br />
+                  sharper entries.
+                </h1>
+                <p className="mt-5 max-w-2xl text-sm leading-7 text-white/72 md:text-base">
+                  조건을 바꾸면 같은 그룹의 결과를 세션 캐시에서 최대한 재사용하고, 새 계산이 필요할 때만 다시 조회합니다.
+                  지금 화면은 단기 대응에 맞게 조건, 결과 수, 즐겨찾기를 한 번에 읽도록 다듬었습니다.
+                </p>
+              </div>
+            </div>
+
+            <div className="relative z-10 grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+              <StatPanel label="선택 조건" value={selectedConditionMeta.id.toString().padStart(2, "0")} accent="text-[#D68D45]" />
+              <StatPanel label="현재 결과" value={`${sortedData.length}`} accent="text-[#8EB6A8]" />
+              <StatPanel label="즐겨찾기" value={`${favorites.length}`} accent="text-[#D8B3A1]" />
+            </div>
+          </div>
+        </header>
+
+        <main className="mt-8 grid gap-8 xl:grid-cols-[0.95fr_1.65fr]">
+          <section className="space-y-6">
+            <div className="rounded-[32px] border border-[#141414]/10 bg-[#FBF8F2]/88 p-5 shadow-[0_18px_60px_rgba(20,20,20,0.06)] backdrop-blur">
+              <div className="mb-4 flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.26em] text-[#141414]/44">
+                    Condition Stack
+                  </div>
+                  <div className="mt-2 text-2xl font-semibold tracking-[-0.04em]">
+                    {selectedConditionMeta.title}
+                  </div>
+                </div>
+                <div className="rounded-full border border-[#141414]/12 bg-white px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#141414]/55">
+                  {selectedConditionMeta.timeframe}
+                </div>
+              </div>
+
+              <div className="text-sm leading-7 text-[#141414]/68">
+                {selectedConditionMeta.description}
+              </div>
+
+              <div className="mt-5 grid gap-2 sm:grid-cols-2">
+                <div className="rounded-[22px] border border-[#141414]/8 bg-white/70 p-4">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#141414]/44">
+                    Last Sync
+                  </div>
+                  <div className="mt-2 text-lg font-semibold tracking-[-0.03em]">
+                    {lastUpdated || "Never"}
+                  </div>
+                </div>
+                <div className="rounded-[22px] border border-[#141414]/8 bg-white/70 p-4">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#141414]/44">
+                    Positive 24h
+                  </div>
+                  <div className="mt-2 text-lg font-semibold tracking-[-0.03em]">
+                    {positiveCount}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-3">
               {CONDITIONS.map((condition) => (
                 <ConditionCard
                   key={condition.id}
@@ -423,162 +231,176 @@ export default function App() {
                 />
               ))}
             </div>
-            <div className="max-w-3xl text-sm leading-relaxed opacity-60">
-              선택 조건 / {selectedConditionMeta.title} / {selectedConditionMeta.description}
-            </div>
-          </div>
-        </div>
+          </section>
 
-        <div className="flex flex-wrap gap-3">
-          <button
-            type="button"
-            onClick={handleReload}
-            disabled={isLoading}
-            className="flex cursor-pointer items-center gap-2 rounded-full border border-[#141414] px-6 py-3 transition-all hover:bg-[#141414] hover:text-[#E4E3E0] disabled:cursor-wait disabled:opacity-50"
-          >
-            <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
-            <span className="text-sm font-medium uppercase tracking-wider">Reload</span>
-          </button>
-          <a
-            href="/screener_result.csv"
-            download
-            className="flex cursor-pointer items-center gap-2 rounded-full border border-[#141414] px-6 py-3 transition-all hover:bg-[#141414] hover:text-[#E4E3E0]"
-          >
-            <Download className="h-4 w-4" />
-            <span className="text-sm font-medium uppercase tracking-wider">Export CSV</span>
-          </a>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-7xl">
-        <AnimatePresence mode="wait">
-          <LoadingBanner
-            key={loadingState}
-            loadingState={loadingState}
-            selectedCondition={selectedConditionMeta}
-            hasData={data.length > 0}
-          />
-        </AnimatePresence>
-
-        {errorMessage && (
-          <div className="mb-6 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-4 text-sm text-rose-700">
-            {errorMessage}
-          </div>
-        )}
-
-        <div className="mb-8 flex items-center justify-between border-b border-[#141414] pb-4">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 opacity-40" />
-            <input
-              type="text"
-              placeholder="Search by name or ticker..."
-              value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
-              className="w-full bg-transparent py-2 pl-10 pr-4 text-sm focus:outline-none"
-            />
-          </div>
-          <div className="text-right text-[11px] font-mono uppercase opacity-50">
-            <div>{isLoading ? "Syncing..." : `Last Sync: ${lastUpdated || "Never"}`}</div>
-            <div className="mt-1">{sortedData.length} results</div>
-          </div>
-        </div>
-
-        {favoriteItems.length > 0 && (
-          <div className="mb-8 rounded-2xl border border-[#141414]/15 p-4">
-            <div className="mb-3 text-[11px] font-mono uppercase tracking-widest opacity-50">
-              Favorites In This Session
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {favoriteItems.map((item) => (
-                <button
-                  key={item.market}
-                  type="button"
-                  onClick={() => setSearchTerm(item.korean_name)}
-                  className="cursor-pointer rounded-full border border-[#141414]/20 px-3 py-1 text-xs transition-colors hover:bg-[#141414] hover:text-[#E4E3E0]"
-                >
-                  {item.korean_name}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="grid grid-cols-12 gap-4 mb-4 px-4">
-          <div className="col-header col-span-1">#</div>
-          <div className="col-header col-span-4">Asset</div>
-          <button
-            type="button"
-            onClick={() => handleSort("price")}
-            className="col-header col-span-2 cursor-pointer text-right transition-opacity hover:opacity-100"
-          >
-            Price (KRW) <SortIcon column="price" sortConfig={sortConfig} />
-          </button>
-          <button
-            type="button"
-            onClick={() => handleSort("change")}
-            className="col-header col-span-2 cursor-pointer text-right transition-opacity hover:opacity-100"
-          >
-            24h Change <SortIcon column="change" sortConfig={sortConfig} />
-          </button>
-          <button
-            type="button"
-            onClick={() => handleSort("volume")}
-            className="col-header col-span-3 cursor-pointer text-right transition-opacity hover:opacity-100"
-          >
-            Volume (24h) <SortIcon column="volume" sortConfig={sortConfig} />
-          </button>
-        </div>
-
-        {isLoading && data.length === 0 ? (
-          <LoadingSkeleton />
-        ) : (
-          <div className="border-t border-[#141414]">
-            <AnimatePresence mode="popLayout">
-              {favoriteItems.map((item, index) => (
-                <ResultRow
-                  key={item.market}
-                  item={item}
-                  index={index}
-                  highlighted
-                  isFavorite={favorites.includes(item.market)}
-                  onToggleFavorite={toggleFavorite}
-                />
-              ))}
-              {otherItems.map((item, index) => (
-                <ResultRow
-                  key={item.market}
-                  item={item}
-                  index={favoriteItems.length + index}
-                  highlighted={false}
-                  isFavorite={favorites.includes(item.market)}
-                  onToggleFavorite={toggleFavorite}
-                />
-              ))}
+          <section className="space-y-6">
+            <AnimatePresence mode="wait">
+              <LoadingBanner
+                key={loadingState}
+                loadingState={loadingState}
+                selectedCondition={selectedConditionMeta}
+                hasData={data.length > 0}
+              />
             </AnimatePresence>
 
-            {sortedData.length === 0 && !isLoading && (
-              <div className="py-20 text-center font-serif text-2xl italic opacity-30">
-                No assets found matching your criteria.
+            {errorMessage && (
+              <div className="rounded-[28px] border border-rose-500/25 bg-rose-500/10 px-5 py-4 text-sm text-rose-700">
+                {errorMessage}
               </div>
             )}
-          </div>
-        )}
-      </main>
 
-      <style dangerouslySetInnerHTML={{ __html: `
-        .col-header {
-          font-family: 'Georgia', serif;
-          font-style: italic;
-          font-size: 11px;
-          opacity: 0.5;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-        }
-        .data-value {
-          font-family: 'Courier New', Courier, monospace;
-          letter-spacing: -0.02em;
-        }
-      ` }}
+            <div className="rounded-[32px] border border-[#141414]/10 bg-[#FBF8F2]/88 p-5 shadow-[0_18px_60px_rgba(20,20,20,0.06)] backdrop-blur">
+              <div className="flex flex-col gap-4 border-b border-[#141414]/8 pb-5 md:flex-row md:items-end md:justify-between">
+                <div className="flex flex-1 flex-col gap-4">
+                  <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-[#141414]/44">
+                    <Sparkles className="h-3.5 w-3.5" />
+                    Live Selection Desk
+                  </div>
+                  <div className="relative max-w-xl">
+                    <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#141414]/35" />
+                    <input
+                      type="text"
+                      placeholder="이름, 티커, 마켓으로 빠르게 찾기"
+                      value={searchTerm}
+                      onChange={(event) => setSearchTerm(event.target.value)}
+                      className="w-full rounded-full border border-[#141414]/10 bg-white/80 py-3 pl-11 pr-4 text-sm outline-none transition-all placeholder:text-[#141414]/35 focus:border-[#141414]/30 focus:bg-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={handleReload}
+                    disabled={isLoading}
+                    className="flex cursor-pointer items-center gap-2 rounded-full border border-[#141414] bg-[#141414] px-5 py-3 text-[#F8F2E8] transition-all hover:bg-[#C65A2E] hover:border-[#C65A2E] disabled:cursor-wait disabled:opacity-55"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+                    <span className="text-sm font-semibold uppercase tracking-[0.16em]">Reload</span>
+                  </button>
+                  <a
+                    href="/screener_result.csv"
+                    download
+                    className="flex cursor-pointer items-center gap-2 rounded-full border border-[#141414]/14 bg-white/75 px-5 py-3 text-[#141414] transition-all hover:border-[#141414]/35 hover:bg-white"
+                  >
+                    <Download className="h-4 w-4" />
+                    <span className="text-sm font-semibold uppercase tracking-[0.16em]">Export CSV</span>
+                  </a>
+                </div>
+              </div>
+
+              {favoriteItems.length > 0 && (
+                <div className="mt-5 rounded-[26px] border border-[#141414]/8 bg-white/65 p-4">
+                  <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#141414]/44">
+                    Favorites In This Session
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {favoriteItems.map((item) => (
+                      <button
+                        key={item.market}
+                        type="button"
+                        onClick={() => setSearchTerm(item.korean_name)}
+                        className="cursor-pointer rounded-full border border-[#141414]/10 bg-[#F8F2E8] px-3 py-1.5 text-xs font-medium transition-colors hover:bg-[#141414] hover:text-[#F8F2E8]"
+                      >
+                        {item.korean_name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-5 grid gap-4 md:grid-cols-4">
+                <StatPanel label="Results" value={`${sortedData.length}`} accent="text-[#C65A2E]" />
+                <StatPanel label="Favorites" value={`${favorites.length}`} accent="text-[#295A52]" />
+                <StatPanel label="Advancers" value={`${positiveCount}`} accent="text-[#4F4A8A]" />
+                <StatPanel label="Status" value={isLoading ? "Syncing" : "Ready"} accent="text-[#7D5A2F]" />
+              </div>
+            </div>
+
+            {isLoading && data.length === 0 ? (
+              <LoadingSkeleton />
+            ) : (
+              <div className="overflow-hidden rounded-[32px] border border-[#141414]/10 bg-[#FBF8F2]/92 shadow-[0_18px_60px_rgba(20,20,20,0.06)]">
+                <div className="grid grid-cols-12 gap-4 border-b border-[#141414]/8 px-5 py-4">
+                  <div className="col-header col-span-1">#</div>
+                  <div className="col-header col-span-4">Asset</div>
+                  <SortButton label="Price (KRW)" column="price" sortConfig={sortConfig} onSort={handleSort} />
+                  <SortButton label="24h Change" column="change" sortConfig={sortConfig} onSort={handleSort} />
+                  <button
+                    type="button"
+                    onClick={() => handleSort("volume")}
+                    className="col-header col-span-3 cursor-pointer text-right transition-opacity hover:opacity-100"
+                  >
+                    Volume (24h){" "}
+                    {sortConfig.key === "volume" ? (
+                      sortConfig.direction === "asc" ? <TrendingUp className="inline-block h-3 w-3" /> : <TrendingDown className="inline-block h-3 w-3" />
+                    ) : (
+                      <span className="inline-block h-3 w-3 opacity-20" />
+                    )}
+                  </button>
+                </div>
+
+                <div className="divide-y divide-[#141414]/8">
+                  <AnimatePresence mode="popLayout">
+                    {favoriteItems.map((item, index) => (
+                      <ResultRow
+                        key={item.market}
+                        item={item}
+                        index={index}
+                        highlighted
+                        isFavorite={favorites.includes(item.market)}
+                        onToggleFavorite={toggleFavorite}
+                      />
+                    ))}
+                    {otherItems.map((item, index) => (
+                      <ResultRow
+                        key={item.market}
+                        item={item}
+                        index={favoriteItems.length + index}
+                        highlighted={false}
+                        isFavorite={favorites.includes(item.market)}
+                        onToggleFavorite={toggleFavorite}
+                      />
+                    ))}
+                  </AnimatePresence>
+
+                  {sortedData.length === 0 && !isLoading && (
+                    <div className="px-6 py-20 text-center">
+                      <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[#141414]/36">
+                        Empty Result
+                      </div>
+                      <div className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-[#141414]/72">
+                        조건에 맞는 종목이 없습니다.
+                      </div>
+                      <div className="mt-3 text-sm leading-7 text-[#141414]/52">
+                        검색어를 비우거나 다른 조건으로 전환해 보세요.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </section>
+        </main>
+      </div>
+
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `
+            .col-header {
+              font-family: 'Aptos', 'Segoe UI', sans-serif;
+              font-size: 11px;
+              font-weight: 700;
+              opacity: 0.5;
+              text-transform: uppercase;
+              letter-spacing: 0.14em;
+            }
+            .data-value {
+              font-family: 'Consolas', 'Courier New', monospace;
+              letter-spacing: -0.02em;
+            }
+          `,
+        }}
       />
     </div>
   );

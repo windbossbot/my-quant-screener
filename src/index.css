@@ -1,1 +1,23 @@
 @import "tailwindcss";
+
+:root {
+  color: #141414;
+  background-color: #efe5d7;
+  font-family: "Aptos", "Segoe UI", "Apple SD Gothic Neo", sans-serif;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background-color: #efe5d7;
+}
+
+button,
+input,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+* {
+  box-sizing: border-box;
+}

@@ -74,6 +74,8 @@ const LOG_PRIORITY: Record<LogLevel, number> = {
   ERROR: 30,
 };
 const CSV_HEADER = "Market,Price,MA20(D),MA60(D),MA120(D),MA240(D),MA120(M),MonthlyCandles\n";
+const TICKER_CACHE_TTL_MS = 30 * 1000;
+const MARKET_METADATA_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 function loadEnvFile() {
   const envPath = path.join(projectRoot, ".env");
@@ -330,8 +332,12 @@ async function startServer() {
   const logFile = path.join(logsDir, `app-${new Date().toISOString().slice(0, 10)}.log`);
   let cachedDailyResults: ResultsCache | null = null;
   let cachedFourHourResults: ResultsCache | null = null;
+  let cachedTickerSnapshot: { generatedAt: number; data: TickerApiResponse } | null = null;
+  let cachedMarketMetadata: { generatedAt: number; data: Map<string, MarketMeta> } | null = null;
   let inflightDailyBuild: Promise<ResultsCache> | null = null;
   let inflightFourHourBuild: Promise<ResultsCache> | null = null;
+  let inflightTickerSnapshot: Promise<TickerApiResponse> | null = null;
+  let inflightMarketMetadata: Promise<Map<string, MarketMeta>> | null = null;
 
   ensureDirectory(publicDir);
   ensureDirectory(logsDir);
@@ -361,26 +367,61 @@ async function startServer() {
   };
 
   const getTickerData = async () => {
-    const tickerData = await fetchJson<TickerApiResponse>("https://api.bithumb.com/public/ticker/ALL_KRW");
-    if (tickerData.status !== "0000") {
-      throw new Error("Bithumb ticker API error");
+    if (cachedTickerSnapshot && Date.now() - cachedTickerSnapshot.generatedAt < TICKER_CACHE_TTL_MS) {
+      return cachedTickerSnapshot.data;
     }
-    return tickerData;
+
+    if (!inflightTickerSnapshot) {
+      inflightTickerSnapshot = fetchJson<TickerApiResponse>("https://api.bithumb.com/public/ticker/ALL_KRW")
+        .then((tickerData) => {
+          if (tickerData.status !== "0000") {
+            throw new Error("Bithumb ticker API error");
+          }
+
+          cachedTickerSnapshot = {
+            generatedAt: Date.now(),
+            data: tickerData,
+          };
+          return tickerData;
+        })
+        .finally(() => {
+          inflightTickerSnapshot = null;
+        });
+    }
+
+    return inflightTickerSnapshot;
   };
 
   const getMarketMetadata = async () => {
-    const marketResponse = await fetchJson<MarketApiRow[]>("https://api.bithumb.com/v1/market/all");
-    const marketMap = new Map<string, MarketMeta>();
-
-    for (const item of marketResponse) {
-      const symbol = String(item.market).replace("KRW-", "");
-      marketMap.set(symbol, {
-        korean_name: item.korean_name,
-        english_name: item.english_name,
-      });
+    if (cachedMarketMetadata && Date.now() - cachedMarketMetadata.generatedAt < MARKET_METADATA_CACHE_TTL_MS) {
+      return cachedMarketMetadata.data;
     }
 
-    return marketMap;
+    if (!inflightMarketMetadata) {
+      inflightMarketMetadata = fetchJson<MarketApiRow[]>("https://api.bithumb.com/v1/market/all")
+        .then((marketResponse) => {
+          const marketMap = new Map<string, MarketMeta>();
+
+          for (const item of marketResponse) {
+            const symbol = String(item.market).replace("KRW-", "");
+            marketMap.set(symbol, {
+              korean_name: item.korean_name,
+              english_name: item.english_name,
+            });
+          }
+
+          cachedMarketMetadata = {
+            generatedAt: Date.now(),
+            data: marketMap,
+          };
+          return marketMap;
+        })
+        .finally(() => {
+          inflightMarketMetadata = null;
+        });
+    }
+
+    return inflightMarketMetadata;
   };
 
   const hasLightTopBidOrderbook = async (symbol: string) => {
