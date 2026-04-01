@@ -30,6 +30,15 @@
 
 배포 시에는 `npm run build` 후 `npm start`를 사용합니다. 서버 헬스체크 경로는 `/healthz` 입니다.
 
+## 전역 조건 부트스트랩
+
+- 단일 기준 파일: [screenerBootstrap.ts](/C:/Users/KGWPC/workspace/my-quant-screener/src/config/screenerBootstrap.ts)
+- 복붙용 설명 문서: [condition-reference.md](/C:/Users/KGWPC/workspace/my-quant-screener/docs/condition-reference.md)
+- 현재 조건 목록 빠른 출력:
+  ```bash
+  npm run conditions:print
+  ```
+
 ## 조건
 
 1. `4시간봉 20·120선 눌림`
@@ -53,10 +62,13 @@
 7. `일봉 120일선 근접`
 일봉 현재가가 120일선 대비 `-1%~+7%` 범위에 있는 종목
 
-8. `주봉 정배열 + 일봉 20선 근접`
+8. `일봉 120일선 ±10%`
+일봉 현재가가 120일선 대비 `-10%~+10%` 범위에 있는 종목
+
+9. `주봉 정배열 + 일봉 20선 근접`
 주봉 20일선, 60일선, 120일선이 상승 정배열이고 현재가가 일봉 20일선 위아래 `5% 이내`인 종목
 
-9. `월봉 정배열 + 일봉 20선 근접`
+10. `월봉 정배열 + 일봉 20선 근접`
 월봉 20일선, 60일선, 120일선이 상승 정배열이고 현재가가 일봉 20일선 위아래 `5% 이내`인 종목
 
 ## 정리

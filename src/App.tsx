@@ -1,7 +1,7 @@
 import { useDeferredValue, useEffect, useState } from "react";
 import { Coins, Download, RefreshCw, Search, TrendingDown, TrendingUp } from "lucide-react";
 import { AnimatePresence } from "motion/react";
-import { CONDITIONS } from "./conditions";
+import { CONDITIONS, DEFAULT_CONDITION_ID, SCREENER_BOOTSTRAP } from "./conditions";
 import { ConditionCard } from "./components/ConditionCard";
 import { LoadingBanner } from "./components/LoadingBanner";
 import { LoadingSkeleton } from "./components/LoadingSkeleton";
@@ -49,7 +49,7 @@ export default function App() {
   const [data, setData] = useState<CryptoData[]>([]);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedCondition, setSelectedCondition] = useState(CONDITIONS[0].id);
+  const [selectedCondition, setSelectedCondition] = useState(DEFAULT_CONDITION_ID);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [loadingState, setLoadingState] = useState<LoadingState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -137,7 +137,7 @@ export default function App() {
                   <Coins className="h-5 w-5" />
                 </div>
                 <span className="text-[11px] font-semibold uppercase tracking-[0.26em] text-white/60">
-                  Bithumb Quant Screener
+                  {SCREENER_BOOTSTRAP.title}
                 </span>
               </div>
 

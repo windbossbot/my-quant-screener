@@ -1,6 +1,12 @@
 import express from "express";
 import fs from "fs";
 import path from "path";
+import {
+  ALL_CONDITION_IDS,
+  DAILY_CONDITION_IDS,
+  FOUR_HOUR_CONDITION_IDS,
+  type ConditionId,
+} from "./src/config/screenerBootstrap.js";
 
 type ScreenerRow = {
   market: string;
@@ -17,7 +23,6 @@ type ScreenerRow = {
   candle_count_m: number;
 };
 
-type ConditionId = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 type ResultsByCondition = Record<ConditionId, ScreenerRow[]>;
 type ResultsCache = { generatedAt: number; resultsByCondition: ResultsByCondition };
 type LogLevel = "DEBUG" | "INFO" | "ERROR";
@@ -64,9 +69,6 @@ type BaseSymbolContext = {
 };
 
 const projectRoot = process.cwd();
-const DAILY_CONDITION_IDS: ConditionId[] = [5, 6, 7, 8, 9];
-const FOUR_HOUR_CONDITION_IDS: ConditionId[] = [1, 2, 3, 4];
-const ALL_CONDITION_IDS: ConditionId[] = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 const EXCLUDED_SYMBOLS = new Set(["USDC", "USDT", "USD1", "USDE", "USDS"]);
 const LOG_PRIORITY: Record<LogLevel, number> = {
   DEBUG: 10,
@@ -110,17 +112,9 @@ function ensureDirectory(dirPath: string) {
 }
 
 function createEmptyResults(): ResultsByCondition {
-  return {
-    1: [],
-    2: [],
-    3: [],
-    4: [],
-    5: [],
-    6: [],
-    7: [],
-    8: [],
-    9: [],
-  };
+  return Object.fromEntries(
+    ALL_CONDITION_IDS.map((conditionId) => [conditionId, [] as ScreenerRow[]]),
+  ) as ResultsByCondition;
 }
 
 function calculateMA(prices: number[], period: number) {
@@ -503,12 +497,16 @@ async function startServer() {
           resultsByCondition[7].push(row);
         }
 
-        if (isBullishAlignment(weeklyPrices) && isNearDailyMA20(dailyPrices, currentPrice)) {
+        if (isWithinPercentRange(currentPrice, row.ma120_d, 10, -10)) {
           resultsByCondition[8].push(row);
         }
 
-        if (isBullishAlignment(monthlyPrices) && isNearDailyMA20(dailyPrices, currentPrice)) {
+        if (isBullishAlignment(weeklyPrices) && isNearDailyMA20(dailyPrices, currentPrice)) {
           resultsByCondition[9].push(row);
+        }
+
+        if (isBullishAlignment(monthlyPrices) && isNearDailyMA20(dailyPrices, currentPrice)) {
+          resultsByCondition[10].push(row);
         }
       } catch (error) {
         logEvent("DEBUG", "daily_symbol_failed", {
