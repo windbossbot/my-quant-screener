@@ -1,10 +1,13 @@
 import { readSessionValue, writeSessionValue } from "./session";
-import type { CachedConditionData, CryptoData, SortConfig } from "../types";
+import type { AssetChartData, CachedConditionData, CryptoData, SortConfig } from "../types";
 
 const FAVORITES_KEY = "quant-screener-favorites";
 const inflightRequests = new Map<number, Promise<CachedConditionData | null>>();
+const CHART_CACHE_PREFIX = "quant-screener-chart-";
+const inflightChartRequests = new Map<string, Promise<AssetChartData | null>>();
 
 export const getCacheKey = (conditionId: number) => `quant-screener-condition-${conditionId}`;
+export const getChartCacheKey = (market: string) => `${CHART_CACHE_PREFIX}${market}`;
 
 export function readCachedConditionData(conditionId: number) {
   return readSessionValue<CachedConditionData>(getCacheKey(conditionId));
@@ -18,6 +21,31 @@ export function clearConditionCache(conditionIds: number[]) {
   conditionIds.forEach((conditionId) => {
     sessionStorage.removeItem(getCacheKey(conditionId));
   });
+}
+
+export function readCachedChartData(market: string) {
+  return readSessionValue<AssetChartData>(getChartCacheKey(market));
+}
+
+export function writeCachedChartData(market: string, value: AssetChartData) {
+  writeSessionValue(getChartCacheKey(market), value);
+}
+
+export function clearChartCache(market?: string) {
+  if (market) {
+    sessionStorage.removeItem(getChartCacheKey(market));
+    return;
+  }
+
+  const keysToRemove: string[] = [];
+  for (let index = 0; index < sessionStorage.length; index += 1) {
+    const key = sessionStorage.key(index);
+    if (key && key.startsWith(CHART_CACHE_PREFIX)) {
+      keysToRemove.push(key);
+    }
+  }
+
+  keysToRemove.forEach((key) => sessionStorage.removeItem(key));
 }
 
 export function readFavorites() {
@@ -82,6 +110,51 @@ export async function requestConditionData(conditionId: number, forceRefresh = f
 
   if (!forceRefresh) {
     inflightRequests.set(conditionId, requestPromise);
+  }
+
+  return requestPromise;
+}
+
+export async function requestAssetChartData(market: string, forceRefresh = false) {
+  if (!forceRefresh) {
+    const cachedData = readCachedChartData(market);
+    if (cachedData) {
+      return cachedData;
+    }
+
+    const inflightRequest = inflightChartRequests.get(market);
+    if (inflightRequest) {
+      return inflightRequest;
+    }
+  }
+
+  const requestPromise = (async () => {
+    try {
+      const refreshQuery = forceRefresh ? "&refresh=1" : "";
+      const response = await fetch(`/api/chart?market=${encodeURIComponent(market)}${refreshQuery}`);
+      if (!response.ok) {
+        throw new Error(`Chart request failed with status ${response.status}`);
+      }
+
+      const result = (await response.json()) as { success?: boolean } & AssetChartData;
+      if (!result.success) {
+        throw new Error("Chart API returned an unsuccessful response");
+      }
+
+      writeCachedChartData(market, result);
+      return result;
+    } catch (error) {
+      console.error("Failed to fetch chart data:", error);
+      return null;
+    } finally {
+      if (!forceRefresh) {
+        inflightChartRequests.delete(market);
+      }
+    }
+  })();
+
+  if (!forceRefresh) {
+    inflightChartRequests.set(market, requestPromise);
   }
 
   return requestPromise;

@@ -67,6 +67,28 @@ type BaseSymbolContext = {
   monthlyPrices: number[];
   row: ScreenerRow;
 };
+type ChartCandle = {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+};
+type ChartLinePoint = {
+  time: number;
+  value: number;
+};
+type ChartFrameData = {
+  candles: ChartCandle[];
+  movingAverages: Record<string, ChartLinePoint[]>;
+};
+type AssetChartResponse = {
+  market: string;
+  symbol: string;
+  generatedAt: number;
+  daily: ChartFrameData;
+  fourHour: ChartFrameData;
+};
 
 const projectRoot = process.cwd();
 const EXCLUDED_SYMBOLS = new Set(["USDC", "USDT", "USD1", "USDE", "USDS"]);
@@ -78,6 +100,8 @@ const LOG_PRIORITY: Record<LogLevel, number> = {
 const CSV_HEADER = "Market,Price,MA20(D),MA60(D),MA120(D),MA240(D),MA120(M),MonthlyCandles\n";
 const TICKER_CACHE_TTL_MS = 30 * 1000;
 const MARKET_METADATA_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const CHART_CACHE_TTL_MS = 60 * 1000;
+const CHART_MOVING_AVERAGE_PERIODS = [20, 30, 60, 120, 240] as const;
 
 function loadEnvFile() {
   const envPath = path.join(projectRoot, ".env");
@@ -240,6 +264,83 @@ function extractClosingPrices(candles: Array<Array<string | number>>) {
   return candles.map((candle) => Number(candle[2]));
 }
 
+function normalizeCandles(candles: Array<Array<string | number>>): ChartCandle[] {
+  return candles
+    .map((candle) => ({
+      time: Math.floor(Number(candle[0]) / 1000),
+      open: Number(candle[1]),
+      close: Number(candle[2]),
+      high: Number(candle[3]),
+      low: Number(candle[4]),
+    }))
+    .filter(
+      (candle) =>
+        Number.isFinite(candle.time) &&
+        Number.isFinite(candle.open) &&
+        Number.isFinite(candle.close) &&
+        Number.isFinite(candle.high) &&
+        Number.isFinite(candle.low),
+    )
+    .sort((left, right) => left.time - right.time);
+}
+
+function aggregateCandles(candles: ChartCandle[], step: number) {
+  const aggregatedCandles: ChartCandle[] = [];
+
+  for (let index = 0; index < candles.length; index += step) {
+    const chunk = candles.slice(index, index + step);
+    if (chunk.length === 0) {
+      continue;
+    }
+
+    // Keep 4-hour grouping aligned with the screener logic that builds higher timeframes
+    // by consuming the lower timeframe data in fixed-size chronological chunks.
+    aggregatedCandles.push({
+      time: chunk[chunk.length - 1].time,
+      open: chunk[0].open,
+      close: chunk[chunk.length - 1].close,
+      high: Math.max(...chunk.map((candle) => candle.high)),
+      low: Math.min(...chunk.map((candle) => candle.low)),
+    });
+  }
+
+  return aggregatedCandles;
+}
+
+function createMovingAverageLine(candles: ChartCandle[], period: number) {
+  const linePoints: ChartLinePoint[] = [];
+
+  for (let index = period - 1; index < candles.length; index += 1) {
+    const closePrices = candles.slice(index - period + 1, index + 1).map((candle) => candle.close);
+    linePoints.push({
+      time: candles[index].time,
+      value: closePrices.reduce((sum, price) => sum + price, 0) / period,
+    });
+  }
+
+  return linePoints;
+}
+
+function createChartFrame(candles: ChartCandle[]): ChartFrameData {
+  const movingAverages = Object.fromEntries(
+    CHART_MOVING_AVERAGE_PERIODS.map((period) => [`ma${period}`, createMovingAverageLine(candles, period)]),
+  );
+
+  return {
+    candles,
+    movingAverages,
+  };
+}
+
+function normalizeSymbol(input: string) {
+  return input
+    .trim()
+    .replace("KRW-", "")
+    .replace("/KRW", "")
+    .replace("_KRW", "")
+    .toUpperCase();
+}
+
 function getTickerEntry(tickerData: TickerApiResponse, symbol: string) {
   const entry = tickerData.data[symbol];
   if (!entry || typeof entry === "string") {
@@ -328,10 +429,12 @@ async function startServer() {
   let cachedFourHourResults: ResultsCache | null = null;
   let cachedTickerSnapshot: { generatedAt: number; data: TickerApiResponse } | null = null;
   let cachedMarketMetadata: { generatedAt: number; data: Map<string, MarketMeta> } | null = null;
+  const chartCache = new Map<string, AssetChartResponse & { generatedAt: number }>();
   let inflightDailyBuild: Promise<ResultsCache> | null = null;
   let inflightFourHourBuild: Promise<ResultsCache> | null = null;
   let inflightTickerSnapshot: Promise<TickerApiResponse> | null = null;
   let inflightMarketMetadata: Promise<Map<string, MarketMeta>> | null = null;
+  const inflightChartRequests = new Map<string, Promise<AssetChartResponse>>();
 
   ensureDirectory(publicDir);
   ensureDirectory(logsDir);
@@ -353,11 +456,34 @@ async function startServer() {
     console.log(entry);
   };
 
-  const fetchJson = async <T>(url: string): Promise<T> => {
-    const response = await fetch(url, {
-      signal: AbortSignal.timeout(fetchTimeoutMs),
-    });
-    return response.json() as Promise<T>;
+  const fetchJson = async <T>(url: string, retryCount = 1): Promise<T> => {
+    let lastError: unknown = null;
+
+    for (let attempt = 0; attempt <= retryCount; attempt += 1) {
+      try {
+        const response = await fetch(url, {
+          signal: AbortSignal.timeout(fetchTimeoutMs),
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const responseText = await response.text();
+        if (!responseText.trim()) {
+          throw new Error("Empty response body");
+        }
+
+        return JSON.parse(responseText) as T;
+      } catch (error) {
+        lastError = error;
+        if (attempt < retryCount) {
+          await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+        }
+      }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
   };
 
   const getTickerData = async () => {
@@ -416,6 +542,54 @@ async function startServer() {
     }
 
     return inflightMarketMetadata;
+  };
+
+  const getAssetChartData = async (marketOrSymbol: string, forceRefresh = false): Promise<AssetChartResponse> => {
+    const symbol = normalizeSymbol(marketOrSymbol);
+    const cachedChart = chartCache.get(symbol);
+
+    if (!forceRefresh && cachedChart && Date.now() - cachedChart.generatedAt < CHART_CACHE_TTL_MS) {
+      return cachedChart;
+    }
+
+    const inflightChartRequest = inflightChartRequests.get(symbol);
+    if (!forceRefresh && inflightChartRequest) {
+      return inflightChartRequest;
+    }
+
+    const chartRequest = Promise.all([
+      fetchJson<CandleApiResponse>(`https://api.bithumb.com/public/candlestick/${symbol}_KRW/24h`),
+      fetchJson<CandleApiResponse>(`https://api.bithumb.com/public/candlestick/${symbol}_KRW/1h`),
+    ])
+      .then(([dailyCandleResponse, hourlyCandleResponse]) => {
+        if (dailyCandleResponse.status !== "0000") {
+          throw new Error(`Daily candle API error for ${symbol}`);
+        }
+
+        if (hourlyCandleResponse.status !== "0000") {
+          throw new Error(`Hourly candle API error for ${symbol}`);
+        }
+
+        const dailyCandles = normalizeCandles(dailyCandleResponse.data);
+        const fourHourCandles = aggregateCandles(normalizeCandles(hourlyCandleResponse.data), 4);
+
+        const chartPayload: AssetChartResponse = {
+          market: `${symbol}/KRW`,
+          symbol,
+          generatedAt: Date.now(),
+          daily: createChartFrame(dailyCandles),
+          fourHour: createChartFrame(fourHourCandles),
+        };
+
+        chartCache.set(symbol, chartPayload);
+        return chartPayload;
+      })
+      .finally(() => {
+        inflightChartRequests.delete(symbol);
+      });
+
+    inflightChartRequests.set(symbol, chartRequest);
+    return chartRequest;
   };
 
   const hasLightTopBidOrderbook = async (symbol: string) => {
@@ -697,6 +871,36 @@ async function startServer() {
       });
 
       return res.status(500).json({ success: false, error: "Failed to fetch data" });
+    }
+  });
+
+  app.get("/api/chart", async (req, res) => {
+    const market = req.query.market?.toString() ?? "";
+    const forceRefresh = req.query.refresh === "1";
+
+    if (!market.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: "market query is required",
+      });
+    }
+
+    try {
+      const chartData = await getAssetChartData(market, forceRefresh);
+      return res.json({
+        success: true,
+        ...chartData,
+      });
+    } catch (error) {
+      logEvent("ERROR", "api_chart_failed", {
+        market,
+        message: error instanceof Error ? error.message : String(error),
+      });
+
+      return res.status(500).json({
+        success: false,
+        error: "Failed to fetch chart data",
+      });
     }
   });
 

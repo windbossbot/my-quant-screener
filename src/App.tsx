@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useState } from "react";
+import { lazy, Suspense, useDeferredValue, useEffect, useRef, useState } from "react";
 import { Coins, Download, RefreshCw, Search, TrendingDown, TrendingUp } from "lucide-react";
 import { AnimatePresence } from "motion/react";
 import { CONDITIONS, DEFAULT_CONDITION_ID, SCREENER_BOOTSTRAP } from "./conditions";
@@ -7,14 +7,20 @@ import { LoadingBanner } from "./components/LoadingBanner";
 import { LoadingSkeleton } from "./components/LoadingSkeleton";
 import { ResultRow } from "./components/ResultRow";
 import {
+  clearChartCache,
   clearConditionCache,
   filterAndSortData,
+  requestAssetChartData,
   readCachedConditionData,
   readFavorites,
   requestConditionData,
   writeFavorites,
 } from "./lib/screenerClient";
-import type { LoadingState, SortConfig, SortDirection, CryptoData } from "./types";
+import type { AssetChartData, LoadingState, SortConfig, SortDirection, CryptoData } from "./types";
+
+const AssetChartsPanel = lazy(() =>
+  import("./components/AssetChartsPanel").then((module) => ({ default: module.AssetChartsPanel })),
+);
 
 function SortButton({
   label,
@@ -53,14 +59,44 @@ export default function App() {
   const [favorites, setFavorites] = useState<string[]>([]);
   const [loadingState, setLoadingState] = useState<LoadingState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [selectedMarket, setSelectedMarket] = useState<string | null>(null);
+  const [chartData, setChartData] = useState<AssetChartData | null>(null);
+  const [chartLoading, setChartLoading] = useState(false);
+  const [chartErrorMessage, setChartErrorMessage] = useState<string | null>(null);
   const [sortConfig, setSortConfig] = useState<SortConfig>({
     key: null,
     direction: "desc",
   });
 
   const deferredSearchTerm = useDeferredValue(searchTerm);
+  const selectedMarketRef = useRef<string | null>(null);
   const selectedConditionMeta = CONDITIONS.find((condition) => condition.id === selectedCondition) ?? CONDITIONS[0];
   const isLoading = loadingState !== "idle";
+
+  const selectedAsset = data.find((item) => item.market === selectedMarket) ?? null;
+
+  const fetchChartData = async (market: string, forceRefresh = false) => {
+    selectedMarketRef.current = market;
+    setChartErrorMessage(null);
+    setChartLoading(true);
+
+    try {
+      const result = await requestAssetChartData(market, forceRefresh);
+      if (selectedMarketRef.current !== market) {
+        return;
+      }
+
+      if (!result) {
+        setChartErrorMessage("차트 데이터를 가져오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+        setChartData(null);
+        return;
+      }
+
+      setChartData(result);
+    } finally {
+      setChartLoading(false);
+    }
+  };
 
   const fetchData = async (forceRefresh = false) => {
     setErrorMessage(null);
@@ -98,9 +134,39 @@ export default function App() {
     setFavorites(readFavorites());
   }, []);
 
+  useEffect(() => {
+    if (data.length === 0) {
+      setSelectedMarket(null);
+      setChartData(null);
+      return;
+    }
+
+    if (!selectedMarket || !data.some((item) => item.market === selectedMarket)) {
+      setSelectedMarket(data[0].market);
+    }
+  }, [data, selectedMarket]);
+
+  useEffect(() => {
+    selectedMarketRef.current = selectedMarket;
+  }, [selectedMarket]);
+
+  useEffect(() => {
+    if (!selectedMarket) {
+      setChartData(null);
+      setChartErrorMessage(null);
+      return;
+    }
+
+    void fetchChartData(selectedMarket);
+  }, [selectedMarket]);
+
   const handleReload = () => {
     clearConditionCache(CONDITIONS.map((condition) => condition.id));
+    clearChartCache(selectedMarket ?? undefined);
     void fetchData(true);
+    if (selectedMarket) {
+      void fetchChartData(selectedMarket, true);
+    }
   };
 
   const handleSort = (key: keyof CryptoData) => {
@@ -259,7 +325,10 @@ export default function App() {
                       <button
                         key={item.market}
                         type="button"
-                        onClick={() => setSearchTerm(item.korean_name)}
+                        onClick={() => {
+                          setSearchTerm(item.korean_name);
+                          setSelectedMarket(item.market);
+                        }}
                         className="cursor-pointer rounded-full border border-[#141414]/10 bg-[#F8F2E8] px-3 py-1.5 text-xs font-medium transition-colors hover:bg-[#141414] hover:text-[#F8F2E8]"
                       >
                         {item.korean_name}
@@ -268,8 +337,26 @@ export default function App() {
                   </div>
                 </div>
               )}
-
             </div>
+
+            <Suspense
+              fallback={
+                <div className="h-[320px] animate-pulse rounded-[32px] border border-[#141414]/10 bg-[#FBF8F2]/88 shadow-[0_18px_60px_rgba(20,20,20,0.06)]" />
+              }
+            >
+              <AssetChartsPanel
+                selectedAsset={selectedAsset}
+                chartData={chartData}
+                loading={chartLoading}
+                errorMessage={chartErrorMessage}
+                onReload={() => {
+                  if (selectedMarket) {
+                    clearChartCache(selectedMarket);
+                    void fetchChartData(selectedMarket, true);
+                  }
+                }}
+              />
+            </Suspense>
 
             {isLoading && data.length === 0 ? (
               <LoadingSkeleton />
@@ -303,6 +390,8 @@ export default function App() {
                         index={index}
                         highlighted
                         isFavorite={favorites.includes(item.market)}
+                        isSelected={selectedMarket === item.market}
+                        onSelect={(asset) => setSelectedMarket(asset.market)}
                         onToggleFavorite={toggleFavorite}
                       />
                     ))}
@@ -313,6 +402,8 @@ export default function App() {
                         index={favoriteItems.length + index}
                         highlighted={false}
                         isFavorite={favorites.includes(item.market)}
+                        isSelected={selectedMarket === item.market}
+                        onSelect={(asset) => setSelectedMarket(asset.market)}
                         onToggleFavorite={toggleFavorite}
                       />
                     ))}

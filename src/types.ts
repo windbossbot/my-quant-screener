@@ -7,6 +7,32 @@ export interface CryptoData {
   volume: number;
 }
 
+export interface ChartCandle {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
+export interface ChartLinePoint {
+  time: number;
+  value: number;
+}
+
+export interface ChartFrameData {
+  candles: ChartCandle[];
+  movingAverages: Record<string, ChartLinePoint[]>;
+}
+
+export interface AssetChartData {
+  market: string;
+  symbol: string;
+  generatedAt: number;
+  daily: ChartFrameData;
+  fourHour: ChartFrameData;
+}
+
 export type CachedConditionData = {
   data: CryptoData[];
   lastUpdated: string;
