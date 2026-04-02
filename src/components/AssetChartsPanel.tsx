@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { CandlestickSeries, ColorType, createChart, LineSeries, PriceScaleMode, type Time } from "lightweight-charts";
 import { BarChart3, Clock3, RefreshCw } from "lucide-react";
-import type { AssetChartData, ChartCandle, ChartFrameData, ChartLinePoint, CryptoData } from "../types";
+import type { AssetChartData, ChartCandle, ChartFrameData, ChartFrameScope, ChartFrameState, ChartLinePoint, CryptoData } from "../types";
 
 const MOVING_AVERAGE_ORDER = ["ma20", "ma30", "ma60", "ma120", "ma240"] as const;
 const MOVING_AVERAGE_LABELS: Record<(typeof MOVING_AVERAGE_ORDER)[number], string> = {
@@ -132,13 +132,15 @@ function usePriceChart(frame: ChartFrameData | null, element: HTMLDivElement | n
 
 function ChartFrameCard({
   title,
-  frame,
+  frameState,
+  onReload,
 }: {
   title: string;
-  frame: ChartFrameData | null;
+  frameState: ChartFrameState;
+  onReload: () => void;
 }) {
   const [containerElement, setContainerElement] = useState<HTMLDivElement | null>(null);
-  usePriceChart(frame, containerElement);
+  usePriceChart(frameState.frame, containerElement);
 
   return (
     <div className="rounded-[28px] border border-[#141414]/10 bg-white/78 p-4 shadow-[0_18px_60px_rgba(20,20,20,0.05)]">
@@ -146,15 +148,41 @@ function ChartFrameCard({
         <div className="text-xl font-semibold tracking-[-0.04em] text-[#141414]">
           {title}
         </div>
-        <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#141414]/42">
-          동일 설정 적용
+        <div className="flex items-center gap-2">
+          {frameState.stale && (
+            <div className="rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-700">
+              Cached
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={onReload}
+            className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-[#141414]/10 bg-[#F8F2E8] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#141414]/62 transition-colors hover:border-[#141414]/30 hover:bg-white"
+          >
+            <RefreshCw className="h-3 w-3" />
+            재시도
+          </button>
         </div>
       </div>
 
-      <div
-        ref={setContainerElement}
-        className="h-[300px] w-full rounded-[22px] border border-[#141414]/8 bg-[linear-gradient(180deg,_rgba(248,242,232,0.9),_rgba(255,255,255,0.98))]"
-      />
+      {frameState.error && (
+        <div className={`mb-4 rounded-[18px] px-4 py-3 text-sm leading-6 ${
+          frameState.frame ? "border border-amber-500/20 bg-amber-500/10 text-amber-800" : "border border-rose-500/25 bg-rose-500/10 text-rose-700"
+        }`}>
+          {frameState.error}
+        </div>
+      )}
+
+      {frameState.frame ? (
+        <div
+          ref={setContainerElement}
+          className="h-[300px] w-full rounded-[22px] border border-[#141414]/8 bg-[linear-gradient(180deg,_rgba(248,242,232,0.9),_rgba(255,255,255,0.98))]"
+        />
+      ) : (
+        <div className="flex h-[300px] items-center justify-center rounded-[22px] border border-dashed border-[#141414]/14 bg-[linear-gradient(180deg,_rgba(248,242,232,0.9),_rgba(255,255,255,0.98))] px-6 text-center text-sm leading-7 text-[#141414]/58">
+          차트 데이터를 아직 가져오지 못했습니다. 재시도로 다시 확인해 주세요.
+        </div>
+      )}
     </div>
   );
 }
@@ -165,12 +193,14 @@ export function AssetChartsPanel({
   loading,
   errorMessage,
   onReload,
+  onReloadFrame,
 }: {
   selectedAsset: CryptoData | null;
   chartData: AssetChartData | null;
   loading: boolean;
   errorMessage: string | null;
   onReload: () => void;
+  onReloadFrame: (frame: ChartFrameScope) => void;
 }) {
   if (!selectedAsset) {
     return (
@@ -262,8 +292,8 @@ export function AssetChartsPanel({
           </div>
 
           <div className="grid gap-5">
-            <ChartFrameCard title="일봉 차트" frame={chartData?.daily ?? null} />
-            <ChartFrameCard title="4시간봉 차트" frame={chartData?.fourHour ?? null} />
+            <ChartFrameCard title="일봉 차트" frameState={chartData.daily} onReload={() => onReloadFrame("daily")} />
+            <ChartFrameCard title="4시간봉 차트" frameState={chartData.fourHour} onReload={() => onReloadFrame("fourHour")} />
           </div>
         </>
       )}

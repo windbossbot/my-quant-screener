@@ -25,12 +25,21 @@ export interface ChartFrameData {
   movingAverages: Record<string, ChartLinePoint[]>;
 }
 
+export type ChartFrameScope = "all" | "daily" | "fourHour";
+
+export interface ChartFrameState {
+  frame: ChartFrameData | null;
+  error: string | null;
+  stale: boolean;
+  generatedAt: number | null;
+}
+
 export interface AssetChartData {
   market: string;
   symbol: string;
   generatedAt: number;
-  daily: ChartFrameData;
-  fourHour: ChartFrameData;
+  daily: ChartFrameState;
+  fourHour: ChartFrameState;
 }
 
 export type CachedConditionData = {

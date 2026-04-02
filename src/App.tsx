@@ -16,7 +16,7 @@ import {
   requestConditionData,
   writeFavorites,
 } from "./lib/screenerClient";
-import type { AssetChartData, LoadingState, SortConfig, SortDirection, CryptoData } from "./types";
+import type { AssetChartData, ChartFrameScope, LoadingState, SortConfig, SortDirection, CryptoData } from "./types";
 
 const AssetChartsPanel = lazy(() =>
   import("./components/AssetChartsPanel").then((module) => ({ default: module.AssetChartsPanel })),
@@ -75,13 +75,13 @@ export default function App() {
 
   const selectedAsset = data.find((item) => item.market === selectedMarket) ?? null;
 
-  const fetchChartData = async (market: string, forceRefresh = false) => {
+  const fetchChartData = async (market: string, forceRefresh = false, frameScope: ChartFrameScope = "all") => {
     selectedMarketRef.current = market;
     setChartErrorMessage(null);
     setChartLoading(true);
 
     try {
-      const result = await requestAssetChartData(market, forceRefresh);
+      const result = await requestAssetChartData(market, forceRefresh, frameScope);
       if (selectedMarketRef.current !== market) {
         return;
       }
@@ -165,7 +165,7 @@ export default function App() {
     clearChartCache(selectedMarket ?? undefined);
     void fetchData(true);
     if (selectedMarket) {
-      void fetchChartData(selectedMarket, true);
+      void fetchChartData(selectedMarket, true, "all");
     }
   };
 
@@ -432,7 +432,12 @@ export default function App() {
                 onReload={() => {
                   if (selectedMarket) {
                     clearChartCache(selectedMarket);
-                    void fetchChartData(selectedMarket, true);
+                    void fetchChartData(selectedMarket, true, "all");
+                  }
+                }}
+                onReloadFrame={(frame) => {
+                  if (selectedMarket) {
+                    void fetchChartData(selectedMarket, true, frame);
                   }
                 }}
               />

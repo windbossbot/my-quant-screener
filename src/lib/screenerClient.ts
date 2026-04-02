@@ -1,5 +1,5 @@
 import { readSessionValue, writeSessionValue } from "./session";
-import type { AssetChartData, CachedConditionData, CryptoData, SortConfig } from "../types";
+import type { AssetChartData, CachedConditionData, ChartFrameScope, CryptoData, SortConfig } from "../types";
 
 const FAVORITES_KEY = "quant-screener-favorites";
 const inflightRequests = new Map<number, Promise<CachedConditionData | null>>();
@@ -115,8 +115,10 @@ export async function requestConditionData(conditionId: number, forceRefresh = f
   return requestPromise;
 }
 
-export async function requestAssetChartData(market: string, forceRefresh = false) {
-  if (!forceRefresh) {
+export async function requestAssetChartData(market: string, forceRefresh = false, frameScope: ChartFrameScope = "all") {
+  const shouldReuseCached = !forceRefresh && frameScope === "all";
+
+  if (shouldReuseCached) {
     const cachedData = readCachedChartData(market);
     if (cachedData) {
       return cachedData;
@@ -131,7 +133,8 @@ export async function requestAssetChartData(market: string, forceRefresh = false
   const requestPromise = (async () => {
     try {
       const refreshQuery = forceRefresh ? "&refresh=1" : "";
-      const response = await fetch(`/api/chart?market=${encodeURIComponent(market)}${refreshQuery}`);
+      const frameQuery = frameScope !== "all" ? `&frame=${frameScope}` : "";
+      const response = await fetch(`/api/chart?market=${encodeURIComponent(market)}${refreshQuery}${frameQuery}`);
       if (!response.ok) {
         throw new Error(`Chart request failed with status ${response.status}`);
       }
@@ -147,13 +150,13 @@ export async function requestAssetChartData(market: string, forceRefresh = false
       console.error("Failed to fetch chart data:", error);
       return null;
     } finally {
-      if (!forceRefresh) {
+      if (shouldReuseCached) {
         inflightChartRequests.delete(market);
       }
     }
   })();
 
-  if (!forceRefresh) {
+  if (shouldReuseCached) {
     inflightChartRequests.set(market, requestPromise);
   }
 

@@ -82,12 +82,19 @@ type ChartFrameData = {
   candles: ChartCandle[];
   movingAverages: Record<string, ChartLinePoint[]>;
 };
+type ChartFrameScope = "all" | "daily" | "fourHour";
+type ChartFrameState = {
+  frame: ChartFrameData | null;
+  error: string | null;
+  stale: boolean;
+  generatedAt: number | null;
+};
 type AssetChartResponse = {
   market: string;
   symbol: string;
   generatedAt: number;
-  daily: ChartFrameData;
-  fourHour: ChartFrameData;
+  daily: ChartFrameState;
+  fourHour: ChartFrameState;
 };
 
 const projectRoot = process.cwd();
@@ -341,6 +348,15 @@ function normalizeSymbol(input: string) {
     .toUpperCase();
 }
 
+function createEmptyChartFrame(error: string | null = null): ChartFrameState {
+  return {
+    frame: null,
+    error,
+    stale: false,
+    generatedAt: null,
+  };
+}
+
 function getTickerEntry(tickerData: TickerApiResponse, symbol: string) {
   const entry = tickerData.data[symbol];
   if (!entry || typeof entry === "string") {
@@ -544,51 +560,102 @@ async function startServer() {
     return inflightMarketMetadata;
   };
 
-  const getAssetChartData = async (marketOrSymbol: string, forceRefresh = false): Promise<AssetChartResponse> => {
+  const getAssetChartData = async (
+    marketOrSymbol: string,
+    forceRefresh = false,
+    frameScope: ChartFrameScope = "all",
+  ): Promise<AssetChartResponse> => {
     const symbol = normalizeSymbol(marketOrSymbol);
     const cachedChart = chartCache.get(symbol);
 
-    if (!forceRefresh && cachedChart && Date.now() - cachedChart.generatedAt < CHART_CACHE_TTL_MS) {
+    if (!forceRefresh && frameScope === "all" && cachedChart && Date.now() - cachedChart.generatedAt < CHART_CACHE_TTL_MS) {
       return cachedChart;
     }
 
     const inflightChartRequest = inflightChartRequests.get(symbol);
-    if (!forceRefresh && inflightChartRequest) {
+    if (!forceRefresh && frameScope === "all" && inflightChartRequest) {
       return inflightChartRequest;
     }
 
+    const buildFrameState = async (
+      scope: Exclude<ChartFrameScope, "all">,
+      previousState: ChartFrameState | undefined,
+    ): Promise<ChartFrameState> => {
+      if (frameScope !== "all" && frameScope !== scope) {
+        return previousState ?? createEmptyChartFrame();
+      }
+
+      const url =
+        scope === "daily"
+          ? `https://api.bithumb.com/public/candlestick/${symbol}_KRW/24h`
+          : `https://api.bithumb.com/public/candlestick/${symbol}_KRW/1h`;
+
+      const retryCount = scope === "daily" ? 2 : 3;
+      const label = scope === "daily" ? "일봉" : "4시간봉";
+
+      try {
+        const candleResponse = await fetchJson<CandleApiResponse>(url, retryCount);
+        if (candleResponse.status !== "0000") {
+          throw new Error(`${label} API status ${candleResponse.status}`);
+        }
+
+        const normalizedCandles = normalizeCandles(candleResponse.data);
+        const chartCandles =
+          scope === "daily" ? normalizedCandles : aggregateCandles(normalizedCandles, 4);
+
+        if (chartCandles.length === 0) {
+          throw new Error(`${label} 데이터가 비어 있습니다.`);
+        }
+
+        return {
+          frame: createChartFrame(chartCandles),
+          error: null,
+          stale: false,
+          generatedAt: Date.now(),
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (previousState?.frame) {
+          return {
+            ...previousState,
+            error: `${label} 재호출 실패로 이전 캐시를 유지합니다. (${message})`,
+            stale: true,
+          };
+        }
+
+        return createEmptyChartFrame(`${label} 데이터를 가져오지 못했습니다. (${message})`);
+      }
+    };
+
     const chartRequest = Promise.all([
-      fetchJson<CandleApiResponse>(`https://api.bithumb.com/public/candlestick/${symbol}_KRW/24h`),
-      fetchJson<CandleApiResponse>(`https://api.bithumb.com/public/candlestick/${symbol}_KRW/1h`),
+      buildFrameState("daily", cachedChart?.daily),
+      buildFrameState("fourHour", cachedChart?.fourHour),
     ])
-      .then(([dailyCandleResponse, hourlyCandleResponse]) => {
-        if (dailyCandleResponse.status !== "0000") {
-          throw new Error(`Daily candle API error for ${symbol}`);
-        }
-
-        if (hourlyCandleResponse.status !== "0000") {
-          throw new Error(`Hourly candle API error for ${symbol}`);
-        }
-
-        const dailyCandles = normalizeCandles(dailyCandleResponse.data);
-        const fourHourCandles = aggregateCandles(normalizeCandles(hourlyCandleResponse.data), 4);
-
+      .then(([daily, fourHour]) => {
         const chartPayload: AssetChartResponse = {
           market: `${symbol}/KRW`,
           symbol,
           generatedAt: Date.now(),
-          daily: createChartFrame(dailyCandles),
-          fourHour: createChartFrame(fourHourCandles),
+          daily,
+          fourHour,
         };
 
-        chartCache.set(symbol, chartPayload);
+        if (daily.frame || fourHour.frame) {
+          chartCache.set(symbol, chartPayload);
+        }
+
         return chartPayload;
       })
       .finally(() => {
-        inflightChartRequests.delete(symbol);
+        if (frameScope === "all") {
+          inflightChartRequests.delete(symbol);
+        }
       });
 
-    inflightChartRequests.set(symbol, chartRequest);
+    if (frameScope === "all") {
+      inflightChartRequests.set(symbol, chartRequest);
+    }
+
     return chartRequest;
   };
 
@@ -877,6 +944,9 @@ async function startServer() {
   app.get("/api/chart", async (req, res) => {
     const market = req.query.market?.toString() ?? "";
     const forceRefresh = req.query.refresh === "1";
+    const rawFrame = req.query.frame?.toString();
+    const frameScope: ChartFrameScope =
+      rawFrame === "daily" || rawFrame === "fourHour" ? rawFrame : "all";
 
     if (!market.trim()) {
       return res.status(400).json({
@@ -886,7 +956,7 @@ async function startServer() {
     }
 
     try {
-      const chartData = await getAssetChartData(market, forceRefresh);
+      const chartData = await getAssetChartData(market, forceRefresh, frameScope);
       return res.json({
         success: true,
         ...chartData,
