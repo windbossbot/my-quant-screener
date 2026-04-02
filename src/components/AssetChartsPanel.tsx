@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { CandlestickSeries, ColorType, createChart, LineSeries, PriceScaleMode, type Time } from "lightweight-charts";
 import { BarChart3, Clock3, RefreshCw } from "lucide-react";
 import type { AssetChartData, ChartCandle, ChartFrameData, ChartLinePoint, CryptoData } from "../types";
@@ -12,11 +12,11 @@ const MOVING_AVERAGE_LABELS: Record<(typeof MOVING_AVERAGE_ORDER)[number], strin
   ma240: "MA 240",
 };
 const MOVING_AVERAGE_COLORS: Record<(typeof MOVING_AVERAGE_ORDER)[number], string> = {
-  ma20: "#D97706",
-  ma30: "#BE185D",
-  ma60: "#0F766E",
-  ma120: "#1D4ED8",
-  ma240: "#6D28D9",
+  ma20: "#DC2626",
+  ma30: "#EA580C",
+  ma60: "#EAB308",
+  ma120: "#16A34A",
+  ma240: "#2563EB",
 };
 
 function formatPrice(value: number) {
@@ -132,57 +132,28 @@ function usePriceChart(frame: ChartFrameData | null, element: HTMLDivElement | n
 
 function ChartFrameCard({
   title,
-  timeframeLabel,
   frame,
 }: {
   title: string;
-  timeframeLabel: string;
   frame: ChartFrameData | null;
 }) {
   const [containerElement, setContainerElement] = useState<HTMLDivElement | null>(null);
   usePriceChart(frame, containerElement);
 
-  const legendItems = useMemo(
-    () =>
-      MOVING_AVERAGE_ORDER.filter((key) => (frame?.movingAverages[key]?.length ?? 0) > 0).map((key) => ({
-        key,
-        label: MOVING_AVERAGE_LABELS[key],
-        color: MOVING_AVERAGE_COLORS[key],
-      })),
-    [frame],
-  );
-
   return (
     <div className="rounded-[28px] border border-[#141414]/10 bg-white/78 p-4 shadow-[0_18px_60px_rgba(20,20,20,0.05)]">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#141414]/42">
-            {timeframeLabel}
-          </div>
-          <div className="mt-1 text-xl font-semibold tracking-[-0.04em] text-[#141414]">
-            {title}
-          </div>
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="text-xl font-semibold tracking-[-0.04em] text-[#141414]">
+          {title}
         </div>
-        <div className="rounded-full border border-[#141414]/10 bg-[#F8F2E8] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#141414]/58">
-          Log Scale
+        <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#141414]/42">
+          동일 설정 적용
         </div>
-      </div>
-
-      <div className="mb-4 flex flex-wrap gap-2">
-        {legendItems.map((item) => (
-          <span
-            key={item.key}
-            className="inline-flex items-center gap-2 rounded-full border border-[#141414]/8 bg-[#F8F2E8] px-3 py-1 text-[11px] font-semibold text-[#141414]/72"
-          >
-            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
-            {item.label}
-          </span>
-        ))}
       </div>
 
       <div
         ref={setContainerElement}
-        className="h-[320px] w-full rounded-[22px] border border-[#141414]/8 bg-[linear-gradient(180deg,_rgba(248,242,232,0.9),_rgba(255,255,255,0.98))]"
+        className="h-[300px] w-full rounded-[22px] border border-[#141414]/8 bg-[linear-gradient(180deg,_rgba(248,242,232,0.9),_rgba(255,255,255,0.98))]"
       />
     </div>
   );
@@ -254,11 +225,11 @@ export function AssetChartsPanel({
       )}
 
       {loading && !chartData ? (
-        <div className="grid gap-4 xl:grid-cols-2">
+        <div className="grid gap-4">
           {[1, 2].map((index) => (
             <div
               key={index}
-              className="h-[420px] animate-pulse rounded-[28px] border border-[#141414]/10 bg-[linear-gradient(180deg,_rgba(255,255,255,0.78),_rgba(248,242,232,0.82))]"
+              className="h-[360px] animate-pulse rounded-[28px] border border-[#141414]/10 bg-[linear-gradient(180deg,_rgba(255,255,255,0.78),_rgba(248,242,232,0.82))]"
             />
           ))}
         </div>
@@ -267,10 +238,34 @@ export function AssetChartsPanel({
           선택한 종목의 차트를 아직 불러오지 못했습니다. 새로고침으로 다시 시도해 주세요.
         </div>
       ) : (
-        <div className="grid gap-5 xl:grid-cols-2">
-          <ChartFrameCard title="일봉 차트" timeframeLabel="Daily" frame={chartData?.daily ?? null} />
-          <ChartFrameCard title="4시간봉 차트" timeframeLabel="4H" frame={chartData?.fourHour ?? null} />
-        </div>
+        <>
+          <div className="mb-5 rounded-[24px] border border-[#141414]/8 bg-white/72 px-4 py-4">
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <span className="rounded-full border border-[#141414]/10 bg-[#F8F2E8] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#141414]/58">
+                Log Scale
+              </span>
+              <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#141414]/38">
+                공통 이평선 설정
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {MOVING_AVERAGE_ORDER.map((key) => (
+                <span
+                  key={key}
+                  className="inline-flex items-center gap-2 rounded-full border border-[#141414]/8 bg-[#F8F2E8] px-3 py-1 text-[11px] font-semibold text-[#141414]/72"
+                >
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: MOVING_AVERAGE_COLORS[key] }} />
+                  {MOVING_AVERAGE_LABELS[key]}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid gap-5">
+            <ChartFrameCard title="일봉 차트" frame={chartData?.daily ?? null} />
+            <ChartFrameCard title="4시간봉 차트" frame={chartData?.fourHour ?? null} />
+          </div>
+        </>
       )}
     </div>
   );
