@@ -69,6 +69,17 @@ type BaseSymbolContext = {
   monthlyPrices: number[];
   row: ScreenerRow;
 };
+type FourHourSymbolContext = {
+  currentCandle: ChartCandle;
+  currentPrice: number;
+  completedCandles: ChartCandle[];
+  completedPrices: number[];
+  ma20: number | null;
+  ma30: number | null;
+  ma120: number | null;
+  ma240: number | null;
+  averageNotionalVolume: number | null;
+};
 type ChartCandle = {
   time: number;
   open: number;
@@ -113,6 +124,8 @@ const MARKET_METADATA_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const CHART_CACHE_TTL_MS = 60 * 1000;
 const CHART_MOVING_AVERAGE_PERIODS = [20, 30, 60, 120, 240] as const;
 const ACTIVE_ENTRY_EXCLUDED_SYMBOLS = new Set(ACTIVE_ENTRY_PROFILE.excludedSymbols);
+const MIN_MONTHLY_CANDLES = 2;
+const MIN_FOUR_HOUR_CANDLES = 241;
 
 function loadEnvFile() {
   const envPath = path.join(projectRoot, ".env");
@@ -369,10 +382,6 @@ function calculateRSI(prices: number[], period = 14) {
   return 100 - 100 / (1 + relativeStrength);
 }
 
-function extractClosingPrices(candles: Array<Array<string | number>>) {
-  return candles.map((candle) => Number(candle[2]));
-}
-
 function normalizeCandles(candles: Array<Array<string | number>>): ChartCandle[] {
   return candles
     .map((candle) => ({
@@ -513,6 +522,134 @@ function buildRow(
     ma120_m: calculateMA(monthlyPrices, 120),
     candle_count_m: monthlyPrices.length,
   };
+}
+
+function buildFourHourSymbolContext(hourlyCandles: ChartCandle[]): FourHourSymbolContext | null {
+  const fourHourCandles = aggregateCandles(hourlyCandles, 4);
+  if (fourHourCandles.length < MIN_FOUR_HOUR_CANDLES) {
+    return null;
+  }
+
+  const currentCandle = fourHourCandles[fourHourCandles.length - 1];
+  const completedCandles = fourHourCandles.slice(0, -1);
+  const completedPrices = completedCandles.map((candle) => candle.close);
+
+  return {
+    currentCandle,
+    currentPrice: currentCandle.close,
+    completedCandles,
+    completedPrices,
+    ma20: calculateMA(completedPrices, 20),
+    ma30: calculateMA(completedPrices, 30),
+    ma120: calculateMA(completedPrices, 120),
+    ma240: calculateMA(completedPrices, 240),
+    averageNotionalVolume: calculateAverageNotionalVolume(
+      completedCandles,
+      ACTIVE_ENTRY_PROFILE.average4hNotionalVolumeLookbackBars,
+    ),
+  };
+}
+
+function appendDailyConditionMatches(
+  resultsByCondition: ResultsByCondition,
+  context: BaseSymbolContext,
+) {
+  const { currentPrice, dailyPrices, weeklyPrices, monthlyPrices, row } = context;
+  const isDailyBullish = isBullishAlignment(dailyPrices);
+
+  if (isDailyBullish) {
+    resultsByCondition[5].push(row);
+  }
+
+  if (isDailyBullish && isWithinPercentRange(currentPrice, calculateMA(dailyPrices, 30), 6, -1)) {
+    resultsByCondition[6].push(row);
+  }
+
+  if (isWithinPercentRange(currentPrice, row.ma120_d, 7, -1)) {
+    resultsByCondition[7].push(row);
+  }
+
+  if (isWithinPercentRange(currentPrice, row.ma120_d, 10, -10)) {
+    resultsByCondition[8].push(row);
+  }
+
+  if (isBullishAlignment(weeklyPrices) && isNearDailyMA20(dailyPrices, currentPrice)) {
+    resultsByCondition[9].push(row);
+  }
+
+  if (isBullishAlignment(monthlyPrices) && isNearDailyMA20(dailyPrices, currentPrice)) {
+    resultsByCondition[10].push(row);
+  }
+}
+
+async function appendFourHourConditionMatches(
+  resultsByCondition: ResultsByCondition,
+  baseContext: BaseSymbolContext,
+  fourHourContext: FourHourSymbolContext,
+  passesTopBidOrderbook: () => Promise<boolean>,
+) {
+  const { symbol, currentPrice, dailyCandles, dailyPrices, row } = baseContext;
+  const {
+    currentCandle,
+    currentPrice: currentFourHourPrice,
+    completedPrices,
+    ma20,
+    ma30,
+    ma120,
+    ma240,
+    averageNotionalVolume,
+  } = fourHourContext;
+
+  const meetsDailyConditionOneGuard = isAboveDailyMAThreshold(dailyPrices, 20, currentPrice, -3);
+  const meetsDailyConditionThreeGuard = isAboveDailyMA(dailyPrices, 30, currentPrice);
+  const meetsDailyConditionFourGuard = isAboveDailyMA(dailyPrices, 20, currentPrice);
+  const dailyMa20 = calculateMA(dailyPrices, ACTIVE_ENTRY_PROFILE.currentTouchDailyMaPeriod);
+
+  // 4시간봉 현재 가격은 진행 중인 캔들을 쓰되, MA는 완료된 4시간봉만으로 계산해
+  // intrabar self-reference를 줄입니다.
+  if (
+    meetsDailyConditionOneGuard &&
+    matchesFourHourRange(currentFourHourPrice, ma20, ma120) &&
+    await passesTopBidOrderbook()
+  ) {
+    resultsByCondition[1].push(row);
+  }
+
+  if (isBullishAlignment(completedPrices) && await passesTopBidOrderbook()) {
+    resultsByCondition[2].push(row);
+  }
+
+  if (
+    meetsDailyConditionThreeGuard &&
+    matchesFourHourRange(currentFourHourPrice, ma30, ma120) &&
+    await passesTopBidOrderbook()
+  ) {
+    resultsByCondition[3].push(row);
+  }
+
+  if (
+    meetsDailyConditionFourGuard &&
+    matchesFourHourRange(currentFourHourPrice, ma30, ma120) &&
+    await passesTopBidOrderbook()
+  ) {
+    resultsByCondition[4].push(row);
+  }
+
+  // perpDex_my live ma_touch_rr long entry proxy for spot screening.
+  if (
+    !ACTIVE_ENTRY_EXCLUDED_SYMBOLS.has(symbol) &&
+    row.change >= ACTIVE_ENTRY_PROFILE.minPriceChangePct / 100 &&
+    row.volume >= ACTIVE_ENTRY_PROFILE.min24hNotionalVolumeKrw &&
+    dailyMa20 !== null &&
+    currentFourHourPrice >= dailyMa20 &&
+    passesDailyTouchEntry(currentCandle, dailyMa20) &&
+    passesCandidateEnvelope(currentFourHourPrice, ma20, ma120, ma240) &&
+    averageNotionalVolume !== null &&
+    averageNotionalVolume >= ACTIVE_ENTRY_PROFILE.minAverage4hNotionalVolumeKrw &&
+    passesRecentVolumeInflowInclusion(dailyCandles)
+  ) {
+    resultsByCondition[11].push(row);
+  }
 }
 
 async function runConcurrentQueue<T>(items: T[], concurrency: number, worker: (item: T) => Promise<void>) {
@@ -789,7 +926,7 @@ async function startServer() {
     const monthlyPrices = toHigherTimeframePrices(dailyPrices, 30);
     const currentPrice = dailyPrices[dailyPrices.length - 1];
 
-    if (!Number.isFinite(currentPrice) || monthlyPrices.length < 2) {
+    if (!Number.isFinite(currentPrice) || monthlyPrices.length < MIN_MONTHLY_CANDLES) {
       return null;
     }
 
@@ -829,33 +966,7 @@ async function startServer() {
         if (!baseContext) {
           return;
         }
-
-        const { currentPrice, dailyPrices, weeklyPrices, monthlyPrices, row } = baseContext;
-        const isDailyBullish = isBullishAlignment(dailyPrices);
-
-        if (isDailyBullish) {
-          resultsByCondition[5].push(row);
-        }
-
-        if (isDailyBullish && isWithinPercentRange(currentPrice, calculateMA(dailyPrices, 30), 6, -1)) {
-          resultsByCondition[6].push(row);
-        }
-
-        if (isWithinPercentRange(currentPrice, row.ma120_d, 7, -1)) {
-          resultsByCondition[7].push(row);
-        }
-
-        if (isWithinPercentRange(currentPrice, row.ma120_d, 10, -10)) {
-          resultsByCondition[8].push(row);
-        }
-
-        if (isBullishAlignment(weeklyPrices) && isNearDailyMA20(dailyPrices, currentPrice)) {
-          resultsByCondition[9].push(row);
-        }
-
-        if (isBullishAlignment(monthlyPrices) && isNearDailyMA20(dailyPrices, currentPrice)) {
-          resultsByCondition[10].push(row);
-        }
+        appendDailyConditionMatches(resultsByCondition, baseContext);
       } catch (error) {
         logEvent("DEBUG", "daily_symbol_failed", {
           symbol,
@@ -881,39 +992,16 @@ async function startServer() {
           return;
         }
 
-        const { currentPrice, dailyCandles, dailyPrices, row } = baseContext;
-
-        const meetsDailyConditionOneGuard = isAboveDailyMAThreshold(dailyPrices, 20, currentPrice, -3);
-        const meetsDailyConditionThreeGuard = isAboveDailyMA(dailyPrices, 30, currentPrice);
-        const meetsDailyConditionFourGuard = isAboveDailyMA(dailyPrices, 20, currentPrice);
-
         const hourlyCandleData = await fetchJson<CandleApiResponse>(`https://api.bithumb.com/public/candlestick/${symbol}_KRW/1h`);
         if (hourlyCandleData.status !== "0000") {
           return;
         }
 
         const hourlyCandles = normalizeCandles(hourlyCandleData.data);
-        const fourHourCandles = aggregateCandles(hourlyCandles, 4);
-        const fourHourPrices = fourHourCandles.map((candle) => candle.close);
-        if (fourHourPrices.length < 240) {
+        const fourHourContext = buildFourHourSymbolContext(hourlyCandles);
+        if (!fourHourContext) {
           return;
         }
-
-        const currentFourHourCandle = fourHourCandles[fourHourCandles.length - 1];
-        const currentFourHourPrice = currentFourHourCandle.close;
-        const ma20FourHour = calculateMA(fourHourPrices, 20);
-        const ma30FourHour = calculateMA(fourHourPrices, 30);
-        const ma120FourHour = calculateMA(fourHourPrices, 120);
-        const completedFourHourCandles = fourHourCandles.slice(0, -1);
-        const completedFourHourPrices = completedFourHourCandles.map((candle) => candle.close);
-        const dailyMa20 = calculateMA(dailyPrices, ACTIVE_ENTRY_PROFILE.currentTouchDailyMaPeriod);
-        const proxyMa20FourHour = calculateMA(completedFourHourPrices, 20);
-        const proxyMa120FourHour = calculateMA(completedFourHourPrices, 120);
-        const proxyMa240FourHour = calculateMA(completedFourHourPrices, 240);
-        const average4hNotionalVolume = calculateAverageNotionalVolume(
-          completedFourHourCandles,
-          ACTIVE_ENTRY_PROFILE.average4hNotionalVolumeLookbackBars,
-        );
 
         let topBidOrderbookCheck: boolean | null = null;
         const passesTopBidOrderbook = async () => {
@@ -923,54 +1011,12 @@ async function startServer() {
           return topBidOrderbookCheck;
         };
 
-        if (
-          meetsDailyConditionOneGuard &&
-          matchesFourHourRange(currentFourHourPrice, ma20FourHour, ma120FourHour) &&
-          await passesTopBidOrderbook()
-        ) {
-          resultsByCondition[1].push(row);
-        }
-
-        if (isBullishAlignment(fourHourPrices) && await passesTopBidOrderbook()) {
-          resultsByCondition[2].push(row);
-        }
-
-        if (
-          meetsDailyConditionThreeGuard &&
-          matchesFourHourRange(currentFourHourPrice, ma30FourHour, ma120FourHour) &&
-          await passesTopBidOrderbook()
-        ) {
-          resultsByCondition[3].push(row);
-        }
-
-        if (
-          meetsDailyConditionFourGuard &&
-          matchesFourHourRange(currentFourHourPrice, ma30FourHour, ma120FourHour) &&
-          await passesTopBidOrderbook()
-        ) {
-          resultsByCondition[4].push(row);
-        }
-
-        // perpDex_my live ma_touch_rr long entry proxy for spot screening.
-        if (
-          !ACTIVE_ENTRY_EXCLUDED_SYMBOLS.has(symbol) &&
-          row.change >= ACTIVE_ENTRY_PROFILE.minPriceChangePct / 100 &&
-          row.volume >= ACTIVE_ENTRY_PROFILE.min24hNotionalVolumeKrw &&
-          dailyMa20 !== null &&
-          currentFourHourPrice >= dailyMa20 &&
-          passesDailyTouchEntry(currentFourHourCandle, dailyMa20) &&
-          passesCandidateEnvelope(
-            currentFourHourPrice,
-            proxyMa20FourHour,
-            proxyMa120FourHour,
-            proxyMa240FourHour,
-          ) &&
-          average4hNotionalVolume !== null &&
-          average4hNotionalVolume >= ACTIVE_ENTRY_PROFILE.minAverage4hNotionalVolumeKrw &&
-          passesRecentVolumeInflowInclusion(dailyCandles)
-        ) {
-          resultsByCondition[11].push(row);
-        }
+        await appendFourHourConditionMatches(
+          resultsByCondition,
+          baseContext,
+          fourHourContext,
+          passesTopBidOrderbook,
+        );
       } catch (error) {
         logEvent("DEBUG", "four_hour_symbol_failed", {
           symbol,
