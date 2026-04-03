@@ -7,6 +7,7 @@ import {
   FOUR_HOUR_CONDITION_IDS,
   type ConditionId,
 } from "./src/config/screenerBootstrap.js";
+import { ACTIVE_ENTRY_PROFILE } from "./src/config/entryBootstrap.js";
 
 type ScreenerRow = {
   market: string;
@@ -62,6 +63,7 @@ type OrderbookApiResponse = {
 type BaseSymbolContext = {
   symbol: string;
   currentPrice: number;
+  dailyCandles: ChartCandle[];
   dailyPrices: number[];
   weeklyPrices: number[];
   monthlyPrices: number[];
@@ -73,6 +75,7 @@ type ChartCandle = {
   high: number;
   low: number;
   close: number;
+  volume: number;
 };
 type ChartLinePoint = {
   time: number;
@@ -109,6 +112,7 @@ const TICKER_CACHE_TTL_MS = 30 * 1000;
 const MARKET_METADATA_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const CHART_CACHE_TTL_MS = 60 * 1000;
 const CHART_MOVING_AVERAGE_PERIODS = [20, 30, 60, 120, 240] as const;
+const ACTIVE_ENTRY_EXCLUDED_SYMBOLS = new Set(ACTIVE_ENTRY_PROFILE.excludedSymbols);
 
 function loadEnvFile() {
   const envPath = path.join(projectRoot, ".env");
@@ -224,6 +228,104 @@ function matchesFourHourRange(currentPrice: number, shortMa: number | null, long
   );
 }
 
+function passesCandidateEnvelope(
+  currentPrice: number,
+  ma20: number | null,
+  ma120: number | null,
+  ma240: number | null,
+) {
+  if (ma20 === null) {
+    return false;
+  }
+
+  const baseCondition =
+    currentPrice >= ma20 * 0.99 &&
+    currentPrice <= ma20 * ACTIVE_ENTRY_PROFILE.ma20UpperMultiplier;
+
+  if (!baseCondition) {
+    return false;
+  }
+
+  const ma120Condition =
+    ma120 !== null &&
+    currentPrice >= ma120 * 0.90 &&
+    currentPrice <= ma120 * ACTIVE_ENTRY_PROFILE.longMaUpperMultiplier;
+
+  const ma240Condition =
+    ma240 !== null &&
+    currentPrice >= ma240 * 0.90 &&
+    currentPrice <= ma240 * ACTIVE_ENTRY_PROFILE.longMaUpperMultiplier;
+
+  return ma120Condition || ma240Condition;
+}
+
+function passesDailyTouchEntry(candle: ChartCandle, dailyMa20: number) {
+  if (ACTIVE_ENTRY_PROFILE.dailyMaEntryTolerancePct <= 0) {
+    return candle.low <= dailyMa20 && candle.high >= dailyMa20;
+  }
+
+  return (
+    candle.close >= dailyMa20 &&
+    candle.close <= dailyMa20 * (1 + ACTIVE_ENTRY_PROFILE.dailyMaEntryTolerancePct)
+  );
+}
+
+function calculateAverageNotionalVolume(candles: ChartCandle[], lookbackBars: number) {
+  if (candles.length < lookbackBars || lookbackBars <= 0) {
+    return null;
+  }
+
+  const recentCandles = candles.slice(-lookbackBars);
+  const totalNotional = recentCandles.reduce((sum, candle) => sum + candle.close * candle.volume, 0);
+  return totalNotional / lookbackBars;
+}
+
+function passesRecentVolumeInflowInclusion(candles: ChartCandle[]) {
+  const {
+    recentVolumeInflowBaselineDays,
+    recentVolumeInflowLookbackDays,
+    recentVolumeInflowMinVolumeRatio,
+  } = ACTIVE_ENTRY_PROFILE;
+
+  if (
+    recentVolumeInflowLookbackDays <= 0 ||
+    recentVolumeInflowMinVolumeRatio <= 0 ||
+    recentVolumeInflowBaselineDays <= 0
+  ) {
+    return true;
+  }
+
+  if (candles.length <= recentVolumeInflowBaselineDays) {
+    return false;
+  }
+
+  const windowStart = Math.max(
+    candles.length - recentVolumeInflowLookbackDays,
+    recentVolumeInflowBaselineDays,
+  );
+
+  for (let index = windowStart; index < candles.length; index += 1) {
+    const currentCandle = candles[index];
+    if (currentCandle.close <= currentCandle.open) {
+      continue;
+    }
+
+    const baselineWindow = candles.slice(index - recentVolumeInflowBaselineDays, index);
+    if (baselineWindow.length === 0) {
+      continue;
+    }
+
+    const averageVolume =
+      baselineWindow.reduce((sum, candle) => sum + candle.volume, 0) / baselineWindow.length;
+
+    if (averageVolume > 0 && currentCandle.volume / averageVolume >= recentVolumeInflowMinVolumeRatio) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function getTopBidNotional(bids: OrderbookEntry[], depth: number) {
   return bids
     .slice(0, depth)
@@ -279,6 +381,7 @@ function normalizeCandles(candles: Array<Array<string | number>>): ChartCandle[]
       close: Number(candle[2]),
       high: Number(candle[3]),
       low: Number(candle[4]),
+      volume: Number(candle[5] ?? 0),
     }))
     .filter(
       (candle) =>
@@ -286,7 +389,8 @@ function normalizeCandles(candles: Array<Array<string | number>>): ChartCandle[]
         Number.isFinite(candle.open) &&
         Number.isFinite(candle.close) &&
         Number.isFinite(candle.high) &&
-        Number.isFinite(candle.low),
+        Number.isFinite(candle.low) &&
+        Number.isFinite(candle.volume),
     )
     .sort((left, right) => left.time - right.time);
 }
@@ -308,6 +412,7 @@ function aggregateCandles(candles: ChartCandle[], step: number) {
       close: chunk[chunk.length - 1].close,
       high: Math.max(...chunk.map((candle) => candle.high)),
       low: Math.min(...chunk.map((candle) => candle.low)),
+      volume: chunk.reduce((sum, candle) => sum + candle.volume, 0),
     });
   }
 
@@ -678,7 +783,8 @@ async function startServer() {
       return null;
     }
 
-    const dailyPrices = extractClosingPrices(dailyCandleData.data);
+    const dailyCandles = normalizeCandles(dailyCandleData.data);
+    const dailyPrices = dailyCandles.map((candle) => candle.close);
     const weeklyPrices = toHigherTimeframePrices(dailyPrices, 7);
     const monthlyPrices = toHigherTimeframePrices(dailyPrices, 30);
     const currentPrice = dailyPrices[dailyPrices.length - 1];
@@ -695,6 +801,7 @@ async function startServer() {
     return {
       symbol,
       currentPrice,
+      dailyCandles,
       dailyPrices,
       weeklyPrices,
       monthlyPrices,
@@ -774,7 +881,7 @@ async function startServer() {
           return;
         }
 
-        const { currentPrice, dailyPrices, row } = baseContext;
+        const { currentPrice, dailyCandles, dailyPrices, row } = baseContext;
 
         const meetsDailyConditionOneGuard = isAboveDailyMAThreshold(dailyPrices, 20, currentPrice, -3);
         const meetsDailyConditionThreeGuard = isAboveDailyMA(dailyPrices, 30, currentPrice);
@@ -785,16 +892,28 @@ async function startServer() {
           return;
         }
 
-        const hourlyPrices = extractClosingPrices(hourlyCandleData.data);
-        const fourHourPrices = toHigherTimeframePrices(hourlyPrices, 4);
+        const hourlyCandles = normalizeCandles(hourlyCandleData.data);
+        const fourHourCandles = aggregateCandles(hourlyCandles, 4);
+        const fourHourPrices = fourHourCandles.map((candle) => candle.close);
         if (fourHourPrices.length < 240) {
           return;
         }
 
-        const currentFourHourPrice = fourHourPrices[fourHourPrices.length - 1];
+        const currentFourHourCandle = fourHourCandles[fourHourCandles.length - 1];
+        const currentFourHourPrice = currentFourHourCandle.close;
         const ma20FourHour = calculateMA(fourHourPrices, 20);
         const ma30FourHour = calculateMA(fourHourPrices, 30);
         const ma120FourHour = calculateMA(fourHourPrices, 120);
+        const completedFourHourCandles = fourHourCandles.slice(0, -1);
+        const completedFourHourPrices = completedFourHourCandles.map((candle) => candle.close);
+        const dailyMa20 = calculateMA(dailyPrices, ACTIVE_ENTRY_PROFILE.currentTouchDailyMaPeriod);
+        const proxyMa20FourHour = calculateMA(completedFourHourPrices, 20);
+        const proxyMa120FourHour = calculateMA(completedFourHourPrices, 120);
+        const proxyMa240FourHour = calculateMA(completedFourHourPrices, 240);
+        const average4hNotionalVolume = calculateAverageNotionalVolume(
+          completedFourHourCandles,
+          ACTIVE_ENTRY_PROFILE.average4hNotionalVolumeLookbackBars,
+        );
 
         let topBidOrderbookCheck: boolean | null = null;
         const passesTopBidOrderbook = async () => {
@@ -830,6 +949,27 @@ async function startServer() {
           await passesTopBidOrderbook()
         ) {
           resultsByCondition[4].push(row);
+        }
+
+        // perpDex_my live ma_touch_rr long entry proxy for spot screening.
+        if (
+          !ACTIVE_ENTRY_EXCLUDED_SYMBOLS.has(symbol) &&
+          row.change >= ACTIVE_ENTRY_PROFILE.minPriceChangePct / 100 &&
+          row.volume >= ACTIVE_ENTRY_PROFILE.min24hNotionalVolumeKrw &&
+          dailyMa20 !== null &&
+          currentFourHourPrice >= dailyMa20 &&
+          passesDailyTouchEntry(currentFourHourCandle, dailyMa20) &&
+          passesCandidateEnvelope(
+            currentFourHourPrice,
+            proxyMa20FourHour,
+            proxyMa120FourHour,
+            proxyMa240FourHour,
+          ) &&
+          average4hNotionalVolume !== null &&
+          average4hNotionalVolume >= ACTIVE_ENTRY_PROFILE.minAverage4hNotionalVolumeKrw &&
+          passesRecentVolumeInflowInclusion(dailyCandles)
+        ) {
+          resultsByCondition[11].push(row);
         }
       } catch (error) {
         logEvent("DEBUG", "four_hour_symbol_failed", {

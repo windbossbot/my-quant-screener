@@ -11,6 +11,7 @@
     "start": "npm run preflight && node build-server/server.js",
     "build": "npm run build:client && npm run build:server",
     "conditions:print": "tsx scripts/print-condition-registry.ts",
+    "entry:print": "tsx scripts/print-entry-bootstrap.ts",
     "clean": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"if (Test-Path dist) { Remove-Item dist -Recurse -Force }; if (Test-Path public\\screener_result.csv) { Remove-Item public\\screener_result.csv -Force }; Get-ChildItem -Path . -Filter *.log -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue\"",
     "lint": "tsc --noEmit",
     "setup:local": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"New-Item -ItemType Directory -Force .local,.local\\archive,.local\\backtesting | Out-Null\"",

@@ -33,10 +33,15 @@
 ## 전역 조건 부트스트랩
 
 - 단일 기준 파일: [screenerBootstrap.ts](/C:/Users/KGWPC/workspace/my-quant-screener/src/config/screenerBootstrap.ts)
+- 진입 프록시 기준 파일: [entryBootstrap.ts](/C:/Users/KGWPC/workspace/my-quant-screener/src/config/entryBootstrap.ts)
 - 복붙용 설명 문서: [condition-reference.md](/C:/Users/KGWPC/workspace/my-quant-screener/docs/condition-reference.md)
 - 현재 조건 목록 빠른 출력:
   ```bash
   npm run conditions:print
+  ```
+- 현재 진입 프록시 빠른 출력:
+  ```bash
+  npm run entry:print
   ```
 
 ## 조건
@@ -52,6 +57,9 @@
 
 4. `4시간봉 30·120선 눌림 + 일봉 20선 위`
 4시간봉 현재가가 30선 대비 `-1%~+5%`, 120선 대비 `-10%~+2%` 범위에 있고, 일봉 20선 위에 있으며 상위 매수 10호가 누적금액이 `1억 미만`인 종목
+
+11. `4시간봉 1일 20선 터치 + 거래량 유입`
+현재 4시간봉이 일봉 20선을 터치하고 종가가 일봉 20선 위에 있으며, 최근 30일 안에 거래량 유입 양봉이 있고 4시간봉 20선 대비 `-1%~+8%`, 120선 또는 240선 대비 `-10%~+4%` 엔벨로프를 만족하며 메이저 종목을 제외한 종목
 
 5. `일봉 정배열`
 일봉 20일선, 60일선, 120일선이 상승 정배열인 종목

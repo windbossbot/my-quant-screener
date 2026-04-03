@@ -1,7 +1,7 @@
 // Single source of truth for condition ids and user-facing labels.
 // Server and client both import this file so new conditions can be added in one place.
 
-export type ConditionId = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+export type ConditionId = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
 
 export type ConditionMeta = {
   id: ConditionId;
@@ -11,7 +11,7 @@ export type ConditionMeta = {
   description: string;
 };
 
-export const FOUR_HOUR_CONDITION_IDS: ConditionId[] = [1, 2, 3, 4];
+export const FOUR_HOUR_CONDITION_IDS: ConditionId[] = [1, 2, 3, 4, 11];
 export const DAILY_CONDITION_IDS: ConditionId[] = [5, 6, 7, 8, 9, 10];
 
 export const CONDITIONS: ConditionMeta[] = [
@@ -42,6 +42,13 @@ export const CONDITIONS: ConditionMeta[] = [
     timeframe: "4시간봉",
     title: "4시간봉 30·120선 눌림 + 일봉 20선 위",
     description: "4시간봉 현재가가 30선 대비 -1%~+5%, 120선 대비 -10%~+2% 범위에 있고, 일봉 20선 위에 있으며 상위 매수 10호가 누적금액이 1억 미만인 종목",
+  },
+  {
+    id: 11,
+    group: "fourHour",
+    timeframe: "4시간봉",
+    title: "4시간봉 1일 20선 터치 + 거래량 유입",
+    description: "현재 4시간봉이 일봉 20선을 터치하고 종가가 일봉 20선 위에 있으며, 최근 30일 거래량 유입과 4시간 20·120·240 엔벨로프를 만족하고 메이저 종목을 제외한 종목",
   },
   {
     id: 5,
@@ -93,8 +100,10 @@ export const DEFAULT_CONDITION_ID: ConditionId = CONDITIONS[0].id;
 export const SCREENER_BOOTSTRAP = {
   title: "Bithumb Quant Screener",
   entryFile: "src/config/screenerBootstrap.ts",
+  entryBootstrapFile: "src/config/entryBootstrap.ts",
   referenceDoc: "docs/condition-reference.md",
   printScriptCommand: "npm run conditions:print",
+  printEntryCommand: "npm run entry:print",
   defaultConditionId: DEFAULT_CONDITION_ID,
   groups: {
     fourHour: FOUR_HOUR_CONDITION_IDS,
