@@ -119,6 +119,7 @@ const LOG_PRIORITY: Record<LogLevel, number> = {
   ERROR: 30,
 };
 const CSV_HEADER = "Market,Price,MA20(D),MA60(D),MA120(D),MA240(D),MA120(M),MonthlyCandles\n";
+const BITHUMB_API_BASE_URL = "https://api.bithumb.com";
 const TICKER_CACHE_TTL_MS = 30 * 1000;
 const MARKET_METADATA_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const CHART_CACHE_TTL_MS = 60 * 1000;
@@ -720,19 +721,29 @@ async function startServer() {
     for (let attempt = 0; attempt <= retryCount; attempt += 1) {
       try {
         const response = await fetch(url, {
+          headers: {
+            accept: "application/json",
+          },
           signal: AbortSignal.timeout(fetchTimeoutMs),
         });
+        const responseText = await response.text();
 
         if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
+          const message = responseText.trim() || `HTTP ${response.status}`;
+          throw new Error(message);
         }
 
-        const responseText = await response.text();
         if (!responseText.trim()) {
           throw new Error("Empty response body");
         }
 
-        return JSON.parse(responseText) as T;
+        try {
+          return JSON.parse(responseText) as T;
+        } catch (error) {
+          throw new Error(
+            `Failed to parse JSON from ${url}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
       } catch (error) {
         lastError = error;
         if (attempt < retryCount) {
@@ -750,7 +761,7 @@ async function startServer() {
     }
 
     if (!inflightTickerSnapshot) {
-      inflightTickerSnapshot = fetchJson<TickerApiResponse>("https://api.bithumb.com/public/ticker/ALL_KRW")
+      inflightTickerSnapshot = fetchJson<TickerApiResponse>(`${BITHUMB_API_BASE_URL}/public/ticker/ALL_KRW`)
         .then((tickerData) => {
           if (tickerData.status !== "0000") {
             throw new Error("Bithumb ticker API error");
@@ -776,7 +787,7 @@ async function startServer() {
     }
 
     if (!inflightMarketMetadata) {
-      inflightMarketMetadata = fetchJson<MarketApiRow[]>("https://api.bithumb.com/v1/market/all")
+      inflightMarketMetadata = fetchJson<MarketApiRow[]>(`${BITHUMB_API_BASE_URL}/v1/market/all`)
         .then((marketResponse) => {
           const marketMap = new Map<string, MarketMeta>();
 
@@ -829,8 +840,8 @@ async function startServer() {
 
       const url =
         scope === "daily"
-          ? `https://api.bithumb.com/public/candlestick/${symbol}_KRW/24h`
-          : `https://api.bithumb.com/public/candlestick/${symbol}_KRW/1h`;
+          ? `${BITHUMB_API_BASE_URL}/public/candlestick/${symbol}_KRW/24h`
+          : `${BITHUMB_API_BASE_URL}/public/candlestick/${symbol}_KRW/1h`;
 
       const retryCount = scope === "daily" ? 2 : 3;
       const label = scope === "daily" ? "일봉" : "4시간봉";
@@ -902,7 +913,7 @@ async function startServer() {
   };
 
   const hasLightTopBidOrderbook = async (symbol: string) => {
-    const orderbookData = await fetchJson<OrderbookApiResponse>(`https://api.bithumb.com/public/orderbook/${symbol}_KRW`);
+    const orderbookData = await fetchJson<OrderbookApiResponse>(`${BITHUMB_API_BASE_URL}/public/orderbook/${symbol}_KRW`);
     if (orderbookData.status !== "0000") {
       return false;
     }
@@ -915,7 +926,7 @@ async function startServer() {
     tickerData: TickerApiResponse,
     marketMetadata: Map<string, MarketMeta>,
   ): Promise<BaseSymbolContext | null> => {
-    const dailyCandleData = await fetchJson<CandleApiResponse>(`https://api.bithumb.com/public/candlestick/${symbol}_KRW/24h`);
+    const dailyCandleData = await fetchJson<CandleApiResponse>(`${BITHUMB_API_BASE_URL}/public/candlestick/${symbol}_KRW/24h`);
     if (dailyCandleData.status !== "0000") {
       return null;
     }
@@ -992,7 +1003,7 @@ async function startServer() {
           return;
         }
 
-        const hourlyCandleData = await fetchJson<CandleApiResponse>(`https://api.bithumb.com/public/candlestick/${symbol}_KRW/1h`);
+        const hourlyCandleData = await fetchJson<CandleApiResponse>(`${BITHUMB_API_BASE_URL}/public/candlestick/${symbol}_KRW/1h`);
         if (hourlyCandleData.status !== "0000") {
           return;
         }

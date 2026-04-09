@@ -12,6 +12,7 @@ import {
   filterAndSortData,
   requestAssetChartData,
   readCachedConditionData,
+  readCachedChartData,
   readFavorites,
   requestConditionData,
   writeFavorites,
@@ -70,19 +71,31 @@ export default function App() {
 
   const deferredSearchTerm = useDeferredValue(searchTerm);
   const selectedMarketRef = useRef<string | null>(null);
+  const conditionRequestSeqRef = useRef(0);
+  const chartRequestSeqRef = useRef(0);
   const selectedConditionMeta = CONDITIONS.find((condition) => condition.id === selectedCondition) ?? CONDITIONS[0];
   const isLoading = loadingState !== "idle";
 
   const selectedAsset = data.find((item) => item.market === selectedMarket) ?? null;
 
   const fetchChartData = async (market: string, forceRefresh = false, frameScope: ChartFrameScope = "all") => {
+    const requestId = ++chartRequestSeqRef.current;
     selectedMarketRef.current = market;
     setChartErrorMessage(null);
+    if (!forceRefresh && frameScope === "all") {
+      const cachedChart = readCachedChartData(market);
+      if (cachedChart) {
+        setChartData(cachedChart);
+        setChartLoading(false);
+        return;
+      }
+    }
+
     setChartLoading(true);
 
     try {
       const result = await requestAssetChartData(market, forceRefresh, frameScope);
-      if (selectedMarketRef.current !== market) {
+      if (chartRequestSeqRef.current !== requestId || selectedMarketRef.current !== market) {
         return;
       }
 
@@ -94,11 +107,14 @@ export default function App() {
 
       setChartData(result);
     } finally {
-      setChartLoading(false);
+      if (chartRequestSeqRef.current === requestId) {
+        setChartLoading(false);
+      }
     }
   };
 
   const fetchData = async (forceRefresh = false) => {
+    const requestId = ++conditionRequestSeqRef.current;
     setErrorMessage(null);
 
     if (!forceRefresh) {
@@ -106,6 +122,7 @@ export default function App() {
       if (cachedData) {
         setData(cachedData.data);
         setLastUpdated(cachedData.lastUpdated);
+        setLoadingState("idle");
         return;
       }
     }
@@ -114,6 +131,10 @@ export default function App() {
 
     try {
       const result = await requestConditionData(selectedCondition, forceRefresh);
+      if (conditionRequestSeqRef.current !== requestId) {
+        return;
+      }
+
       if (!result) {
         setErrorMessage("조건 데이터를 가져오지 못했습니다. 잠시 후 다시 시도해 주세요.");
         return;
@@ -122,7 +143,9 @@ export default function App() {
       setData(result.data);
       setLastUpdated(result.lastUpdated);
     } finally {
-      setLoadingState("idle");
+      if (conditionRequestSeqRef.current === requestId) {
+        setLoadingState("idle");
+      }
     }
   };
 

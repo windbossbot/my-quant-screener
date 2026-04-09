@@ -6,6 +6,30 @@ const inflightRequests = new Map<number, Promise<CachedConditionData | null>>();
 const CHART_CACHE_PREFIX = "quant-screener-chart-";
 const inflightChartRequests = new Map<string, Promise<AssetChartData | null>>();
 
+async function requestJson<T>(path: string, params: Record<string, string | number | boolean | undefined>) {
+  const url = new URL(path, window.location.origin);
+
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined) {
+      url.searchParams.set(key, String(value));
+    }
+  });
+
+  const response = await fetch(url.toString());
+  const responseText = await response.text();
+
+  if (!response.ok) {
+    const reason = responseText.trim() || `status ${response.status}`;
+    throw new Error(reason);
+  }
+
+  if (!responseText.trim()) {
+    throw new Error("Empty response body");
+  }
+
+  return JSON.parse(responseText) as T;
+}
+
 export const getCacheKey = (conditionId: number) => `quant-screener-condition-${conditionId}`;
 export const getChartCacheKey = (market: string) => `${CHART_CACHE_PREFIX}${market}`;
 
@@ -72,13 +96,16 @@ export async function requestConditionData(conditionId: number, forceRefresh = f
 
   const requestPromise = (async () => {
     try {
-      const refreshQuery = forceRefresh ? "&refresh=1" : "";
-      const response = await fetch(`/api/crypto?conditionId=${conditionId}${refreshQuery}`);
-      if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`);
-      }
+      const result = await requestJson<{
+        success?: boolean;
+        data?: CryptoData[];
+        allData?: Record<string, CryptoData[]>;
+        generatedAt?: number;
+      }>("/api/crypto", {
+        conditionId,
+        refresh: forceRefresh ? 1 : undefined,
+      });
 
-      const result = await response.json();
       if (!result.success) {
         throw new Error("API returned an unsuccessful response");
       }
@@ -90,12 +117,17 @@ export async function requestConditionData(conditionId: number, forceRefresh = f
         Object.entries(allData).forEach(([key, value]) => {
           writeCachedConditionData(Number(key), value, updatedAt);
         });
-      } else {
-        writeCachedConditionData(conditionId, result.data as CryptoData[], updatedAt);
       }
 
-      return readCachedConditionData(conditionId) ?? {
-        data: result.data as CryptoData[],
+      const selectedData = allData?.[String(conditionId)] ?? result.data;
+      if (!selectedData) {
+        throw new Error("API response is missing condition data");
+      }
+
+      writeCachedConditionData(conditionId, selectedData, updatedAt);
+
+      return {
+        data: selectedData,
         lastUpdated: updatedAt,
       };
     } catch (error) {
@@ -132,14 +164,12 @@ export async function requestAssetChartData(market: string, forceRefresh = false
 
   const requestPromise = (async () => {
     try {
-      const refreshQuery = forceRefresh ? "&refresh=1" : "";
-      const frameQuery = frameScope !== "all" ? `&frame=${frameScope}` : "";
-      const response = await fetch(`/api/chart?market=${encodeURIComponent(market)}${refreshQuery}${frameQuery}`);
-      if (!response.ok) {
-        throw new Error(`Chart request failed with status ${response.status}`);
-      }
+      const result = await requestJson<{ success?: boolean } & AssetChartData>("/api/chart", {
+        market,
+        refresh: forceRefresh ? 1 : undefined,
+        frame: frameScope !== "all" ? frameScope : undefined,
+      });
 
-      const result = (await response.json()) as { success?: boolean } & AssetChartData;
       if (!result.success) {
         throw new Error("Chart API returned an unsuccessful response");
       }
